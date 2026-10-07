@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-const mockRoom = { name: "Demo Room", subject: "Subject", id: "0000" };
+const mockRoom: any = { name: "Demo Room", subject: "Subject", id: "0000" };
 import { BottomNav } from "@/components/BottomNav";
 
 export default function JoinRoom() {

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { BottomNav } from "@/components/BottomNav";
-const mockGlobalLeaderboard = [];
+const mockGlobalLeaderboard: any[] = [];
 import Link from "next/link";
 
 export default function TestsPage() {
@@ -142,7 +142,7 @@ export default function TestsPage() {
                       </span>
                       {student.badges && student.badges.length > 0 && (
                         <div className="flex gap-1 mt-1">
-                          {student.badges.map(b => (
+                          {student.badges.map((b: any) => (
                             <span key={b} className="text-[9px] font-label-mono-sm uppercase bg-tertiary-container/10 text-tertiary px-1 py-0.5 rounded">
                               {b}
                             </span>

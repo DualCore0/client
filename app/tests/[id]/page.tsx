@@ -89,7 +89,7 @@ export default function TakeAssessment() {
       const { submitTest } = await import('../../../lib/api');
       const formattedAnswers = Object.entries(selectedOptions).map(([qId, oId]) => ({
         questionId: qId,
-        selectedOptionId: oId
+        selectedAnswer: parseInt(oId as string, 10)
       }));
       await submitTest(testData.id, formattedAnswers);
       showToast("Assessment Submitted Successfully!");
@@ -162,7 +162,7 @@ export default function TakeAssessment() {
           </h2>
 
           <div className="flex flex-col gap-3 mt-2">
-            {currentQuestion.options.map((opt) => {
+            {currentQuestion.options.map((opt: any) => {
               const isSelected = selectedOptions[currentQuestion.id] === opt.id;
               return (
                 <label 

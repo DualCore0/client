@@ -4,7 +4,9 @@ import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { uploadDocument, generateAITest, publishTest, editQuestion, deleteQuestion } from "@/lib/api";
 
-export default function CreateAITest() {
+import { Suspense } from "react";
+
+function CreateAITestInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [roomId, setRoomId] = useState("");
@@ -306,5 +308,17 @@ export default function CreateAITest() {
 
       </div>
     </div>
+  );
+}
+
+export default function CreateAITest() {
+  return (
+    <Suspense fallback={
+      <div className="flex-1 flex items-center justify-center p-8 bg-surface">
+        <span className="material-symbols-outlined animate-spin text-[32px] text-primary">progress_activity</span>
+      </div>
+    }>
+      <CreateAITestInner />
+    </Suspense>
   );
 }
