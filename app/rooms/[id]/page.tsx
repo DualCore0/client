@@ -2,14 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { mockRoom, mockActiveTests, mockLeaderboard } from "@/lib/mock-data";
+
 import { BottomNav } from "@/components/BottomNav";
 
 export default function RoomDashboard() {
   const params = useParams();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [room, setRoom] = useState<typeof mockRoom | null>(null);
+  const [room, setRoom] = useState<any | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
 
   useEffect(() => {
@@ -154,7 +154,7 @@ export default function RoomDashboard() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <h2 className="font-headline-sm text-headline-sm text-on-surface">Active Tests</h2>
-              <span className="bg-primary-fixed text-on-primary-fixed font-label-mono-sm text-label-mono-sm px-1.5 py-0.5 rounded-full font-semibold">{mockActiveTests.length}</span>
+              <span className="bg-primary-fixed text-on-primary-fixed font-label-mono-sm text-label-mono-sm px-1.5 py-0.5 rounded-full font-semibold">{room.testsData ? room.testsData.length : 0}</span>
             </div>
             <button className="font-label-mono text-label-mono text-primary font-medium hover:underline">View All</button>
           </div>

@@ -2,7 +2,7 @@
 
 import { useState , useEffect} from "react";
 import { BottomNav } from "@/components/BottomNav";
-import { mockUpcomingExams, mockTestHistory } from "@/lib/mock-data";
+
 import Link from "next/link";
 
 export default function Dashboard() {

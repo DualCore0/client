@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { mockLeaderboard } from "@/lib/mock-data";
+const mockLeaderboard: any[] = [];
 import { BottomNav } from "@/components/BottomNav";
 
 export default function StudentProfile() {

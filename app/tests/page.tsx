@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { BottomNav } from "@/components/BottomNav";
-import { mockGlobalLeaderboard } from "@/lib/mock-data";
+const mockGlobalLeaderboard = [];
 import Link from "next/link";
 
 export default function TestsPage() {

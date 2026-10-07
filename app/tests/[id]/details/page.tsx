@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { mockTestHistory } from "@/lib/mock-data";
+const mockTestHistory: any[] = [];
 import { BottomNav } from "@/components/BottomNav";
 
 export default function TestDetails() {

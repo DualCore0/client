@@ -1,4 +1,4 @@
-import { Controller, Post, UseInterceptors, UploadedFile, Param, UseGuards, Request, BadRequestException } from '@nestjs/common';
+import { Controller, Post, UseInterceptors, UploadedFile, Param, UseGuards, Request, BadRequestException, ParseFilePipeBuilder, HttpStatus } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { DocumentsService } from './documents.service.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
@@ -14,7 +14,18 @@ export class DocumentsController {
   @Roles(Role.TEACHER)
   @UseInterceptors(FileInterceptor('file'))
   uploadFile(
-    @UploadedFile() file: any,
+    @UploadedFile(
+      new ParseFilePipeBuilder()
+        .addFileTypeValidator({
+          fileType: 'pdf',
+        })
+        .addMaxSizeValidator({
+          maxSize: 10 * 1024 * 1024, // 10MB limit
+        })
+        .build({
+          errorHttpStatusCode: HttpStatus.UNPROCESSABLE_ENTITY,
+        }),
+    ) file: any,
     @Param('roomId') roomId: string,
     @Request() req: any
   ) {
