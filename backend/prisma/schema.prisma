@@ -1,0 +1,148 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  STUDENT
+  TEACHER
+}
+
+enum TestStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+}
+
+enum DocumentStatus {
+  PROCESSING
+  READY
+  FAILED
+}
+
+model User {
+  id              String       @id @default(uuid())
+  email           String       @unique
+  fullname        String?
+  password        String
+  role            Role         @default(STUDENT)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  roomsCreated    Room[]       @relation("RoomTeacher")
+  roomMemberships RoomMember[]
+  testsCreated    Test[]
+  submissions     Submission[]
+  documents       Document[]
+}
+
+model Room {
+  id          String       @id @default(uuid())
+  code        String       @unique
+  name        String
+  subject     String?
+  description String?
+  teacherId   String
+  teacher     User         @relation("RoomTeacher", fields: [teacherId], references: [id])
+  createdAt   DateTime     @default(now())
+
+  members     RoomMember[]
+  tests       Test[]
+  documents   Document[]
+}
+
+model RoomMember {
+  id        String   @id @default(uuid())
+  roomId    String
+  studentId String
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  student   User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  joinedAt  DateTime @default(now())
+
+  @@unique([roomId, studentId])
+}
+
+model Document {
+  id          String         @id @default(uuid())
+  roomId      String
+  room        Room           @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  fileName    String
+  fileUrl     String
+  status      DocumentStatus @default(PROCESSING)
+  uploadedBy  String
+  uploader    User           @relation(fields: [uploadedBy], references: [id])
+  createdAt   DateTime       @default(now())
+
+  tests       Test[]
+}
+
+model Test {
+  id            String     @id @default(uuid())
+  title         String
+  topic         String?
+  duration      Int?       // in minutes
+  questionCount Int        @default(0)
+  difficulty    String?
+  status        TestStatus @default(DRAFT)
+  roomId        String?
+  room          Room?      @relation(fields: [roomId], references: [id])
+  documentId    String?
+  document      Document?  @relation(fields: [documentId], references: [id])
+  creatorId     String
+  creator       User       @relation(fields: [creatorId], references: [id])
+  createdAt     DateTime   @default(now())
+  publishedAt   DateTime?
+
+  questions   Question[]
+  submissions Submission[]
+}
+
+model Question {
+  id            String   @id @default(uuid())
+  testId        String
+  test          Test     @relation(fields: [testId], references: [id], onDelete: Cascade)
+  questionText  String
+  options       Json     // Array of 4 strings: ["option0", "option1", "option2", "option3"]
+  correctAnswer Int      // 0-3 index into options array
+  difficulty    String?  // EASY, MEDIUM, HARD
+  points        Int      @default(1)
+  createdAt     DateTime @default(now())
+
+  answers       Answer[]
+}
+
+model Submission {
+  id             String    @id @default(uuid())
+  testId         String
+  test           Test      @relation(fields: [testId], references: [id], onDelete: Cascade)
+  studentId      String
+  student        User      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  score          Int?
+  percentage     Float?
+  correctAnswers Int?
+  wrongAnswers   Int?
+  timeTaken      Int?      // in seconds
+  startedAt      DateTime  @default(now())
+  submittedAt    DateTime?
+
+  answers        Answer[]
+
+  @@unique([testId, studentId])
+}
+
+model Answer {
+  id              String     @id @default(uuid())
+  submissionId    String
+  submission      Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  questionId      String
+  question        Question   @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  selectedAnswer  Int?       // 0-3 index
+  isCorrect       Boolean    @default(false)
+  createdAt       DateTime   @default(now())
+
+  @@unique([submissionId, questionId])
+}
