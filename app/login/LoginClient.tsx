@@ -191,9 +191,9 @@ export function LoginClient() {
                 <input type="checkbox" className="w-4 h-4 rounded text-primary bg-surface-container-low accent-primary cursor-pointer" defaultChecked />
                 <span className="font-body-sm text-body-sm text-on-surface">Remember me</span>
               </label>
-              <a href="#" className="font-body-sm text-body-sm text-primary hover:underline font-medium">
+              <Link href="/forgot-password" className="font-body-sm text-body-sm text-primary hover:underline font-medium">
                 Forgot password?
-              </a>
+              </Link>
             </div>
 
             <button disabled={loading} type="submit" className="w-full bg-primary hover:bg-primary-container text-on-primary font-headline-sm text-headline-sm py-2.5 px-space-md rounded-lg shadow-sm transition-all active:scale-[0.99] flex items-center justify-center gap-2 mt-2 disabled:opacity-80">

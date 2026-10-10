@@ -44,25 +44,86 @@ type RequestOptions = {
   body?: unknown;
   /** Set to false for form-data uploads so the browser sets the boundary. */
   json?: boolean;
+  /** Internal: prevents a refresh loop when the refresh call itself 401s. */
+  skipRefresh?: boolean;
 };
 
-export async function request<T = unknown>(path: string, options: RequestOptions = {}): Promise<T> {
+/** Paths where a 401 means "bad credentials", not "expired token". */
+const NO_REFRESH_PATHS = ['/auth/login', '/auth/register', '/auth/signup', '/auth/refresh'];
+
+/**
+ * Exchanges the httpOnly refresh cookie for a new access token.
+ * Resolves to null when the session cannot be renewed.
+ */
+let refreshInFlight: Promise<string | null> | null = null;
+
+export async function refreshSession(): Promise<string | null> {
+  // Collapse concurrent refreshes: rotation invalidates the previous token, so
+  // two parallel refreshes would revoke each other.
+  if (refreshInFlight) return refreshInFlight;
+
+  refreshInFlight = (async () => {
+    try {
+      const res = await fetch(`${API_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        cache: 'no-store',
+        body: '{}',
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as { access_token?: string };
+      if (!data?.access_token) return null;
+      setToken(data.access_token);
+      return data.access_token;
+    } catch {
+      return null;
+    } finally {
+      // Allow the next expiry to trigger a fresh refresh.
+      setTimeout(() => {
+        refreshInFlight = null;
+      }, 0);
+    }
+  })();
+
+  return refreshInFlight;
+}
+
+async function rawFetch(path: string, options: RequestOptions, token: string | null): Promise<Response> {
   const { method = 'GET', body, json = true } = options;
   const headers: Record<string, string> = {};
-  const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined && json) headers['Content-Type'] = 'application/json';
 
+  return fetch(`${API_URL}${path}`, {
+    method,
+    headers,
+    // Sends the httpOnly refresh cookie on the same-origin proxy route.
+    credentials: 'include',
+    body: body === undefined ? undefined : json ? JSON.stringify(body) : (body as BodyInit),
+    cache: 'no-store',
+  });
+}
+
+export async function request<T = unknown>(path: string, options: RequestOptions = {}): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${API_URL}${path}`, {
-      method,
-      headers,
-      body: body === undefined ? undefined : json ? JSON.stringify(body) : (body as BodyInit),
-      cache: 'no-store',
-    });
+    res = await rawFetch(path, options, getToken());
   } catch {
     throw new ApiError('Cannot reach the server. Is the backend running?', 0);
+  }
+
+  // Access tokens are short-lived by design. On expiry, rotate the refresh
+  // token once and replay the request rather than bouncing the user to /login.
+  if (res.status === 401 && !options.skipRefresh && !NO_REFRESH_PATHS.some((p) => path.startsWith(p))) {
+    const renewed = await refreshSession();
+    if (renewed) {
+      try {
+        res = await rawFetch(path, options, renewed);
+      } catch {
+        throw new ApiError('Cannot reach the server. Is the backend running?', 0);
+      }
+    }
   }
 
   if (res.status === 401) {
@@ -94,14 +155,19 @@ export async function request<T = unknown>(path: string, options: RequestOptions
 
 /* ─── types ─────────────────────────────────────────────────── */
 
-export type Role = 'STUDENT' | 'TEACHER';
+export type Role = 'STUDENT' | 'TEACHER' | 'ADMIN';
+
+export type UserStatus = 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'LOCKED' | 'DELETED';
 
 export type AuthUser = {
   id: string;
   email: string;
   fullname: string | null;
   role: Role;
+  status?: UserStatus;
+  emailVerified?: boolean;
   createdAt?: string;
+  lastLoginAt?: string | null;
 };
 
 export type Room = {
@@ -284,6 +350,144 @@ export function login(data: { email: string; password: string }) {
 
 export function getMe() {
   return request<AuthUser>('/auth/me');
+}
+
+/** Revokes the current session server-side and clears the refresh cookie. */
+export function logout() {
+  return request<{ success: boolean }>('/auth/logout', { method: 'POST', body: {} });
+}
+
+/** Revokes every session and invalidates all outstanding access tokens. */
+export function logoutAll() {
+  return request<{ success: boolean; sessionsRevoked: number }>('/auth/logout-all', {
+    method: 'POST',
+    body: {},
+  });
+}
+
+export function changePassword(data: { currentPassword: string; newPassword: string }) {
+  return request<{ success: boolean; sessionsRevoked: number }>('/auth/change-password', {
+    method: 'POST',
+    body: data,
+  });
+}
+
+export function forgotPassword(email: string) {
+  return request<{ success: boolean; message: string; resetToken?: string }>('/auth/forgot-password', {
+    method: 'POST',
+    body: { email },
+  });
+}
+
+export function resetPassword(data: { token: string; password: string }) {
+  return request<{ success: boolean; message: string }>('/auth/reset-password', {
+    method: 'POST',
+    body: data,
+  });
+}
+
+export function verifyEmail(token: string) {
+  return request<{ success: boolean }>('/auth/verify-email', { method: 'POST', body: { token } });
+}
+
+export function resendVerification() {
+  return request<{ success: boolean; alreadyVerified?: boolean; verificationToken?: string }>(
+    '/auth/resend-verification',
+    { method: 'POST', body: {} },
+  );
+}
+
+/* ─── Password policy (mirrors src/common/security/password-policy.ts) ── */
+
+export const PASSWORD_MIN_LENGTH = 10;
+export const PASSWORD_MAX_LENGTH = 128;
+
+const COMMON_PASSWORDS = new Set([
+  'password', 'password1', 'password12', 'password123', 'password1234',
+  'passw0rd', 'p@ssw0rd', 'p@ssword1', 'passwords',
+  '123456', '1234567', '12345678', '123456789', '1234567890', 'qwerty',
+  'qwerty123', 'qwertyuiop', 'letmein', 'letmein123', 'welcome', 'welcome1',
+  'welcome123', 'admin', 'admin123', 'administrator', 'root', 'toor',
+  'iloveyou', 'monkey', 'dragon', 'sunshine', 'princess', 'football',
+  'baseball', 'master', 'shadow', 'superman', 'trustno1', 'abc123',
+  'abcd1234', 'test1234', 'changeme', 'changeme123', 'secret', 'secret123',
+  'classrank', 'classrank123', 'student', 'student123', 'teacher',
+  'teacher123', 'school', 'school123', 'exam', 'exam1234',
+]);
+
+const SEQUENCES = ['abcdefghijklmnopqrstuvwxyz', '0123456789', 'qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
+
+const deLeet = (value: string) =>
+  value
+    .replace(/[@4]/g, 'a')
+    .replace(/0/g, 'o')
+    .replace(/[1!|]/g, 'i')
+    .replace(/3/g, 'e')
+    .replace(/[$5]/g, 's')
+    .replace(/7/g, 't')
+    .replace(/8/g, 'b');
+
+const plainSkeleton = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+const skeleton = (value: string) => deLeet(value.toLowerCase()).replace(/[^a-z0-9]/g, '');
+
+/**
+ * Client-side mirror of the server policy so the user gets immediate feedback.
+ * The server re-validates everything; this is UX only.
+ */
+export function validatePassword(
+  password: string,
+  context: { email?: string; fullname?: string } = {},
+): { ok: boolean; errors: string[]; score: number } {
+  const errors: string[] = [];
+
+  if (!password) return { ok: false, errors: ['Password is required'], score: 0 };
+
+  if (password.length < PASSWORD_MIN_LENGTH) {
+    errors.push(`At least ${PASSWORD_MIN_LENGTH} characters`);
+  }
+  if (password.length > PASSWORD_MAX_LENGTH) errors.push('Too long');
+  if (!/[a-z]/.test(password)) errors.push('One lowercase letter');
+  if (!/[A-Z]/.test(password)) errors.push('One uppercase letter');
+  if (!/[0-9]/.test(password)) errors.push('One digit');
+  if (!/[^A-Za-z0-9]/.test(password)) errors.push('One symbol');
+
+  const bare = plainSkeleton(password);
+  const leet = skeleton(password);
+  if (COMMON_PASSWORDS.has(password.toLowerCase()) || COMMON_PASSWORDS.has(bare) || COMMON_PASSWORDS.has(leet)) {
+    errors.push('Not a common password');
+  }
+  if (/(.)\1{3,}/i.test(password)) errors.push('No four repeated characters');
+
+  let hasSequence = false;
+  for (const sequence of SEQUENCES) {
+    for (let i = 0; i + 4 <= sequence.length; i++) {
+      if (password.toLowerCase().includes(sequence.slice(i, i + 4))) {
+        hasSequence = true;
+        break;
+      }
+    }
+    if (hasSequence) break;
+  }
+  if (hasSequence) errors.push('No keyboard or alphabet runs');
+
+  const identities = [context.email?.split('@')[0], context.fullname]
+    .filter((v): v is string => Boolean(v && v.trim().length >= 4))
+    .map((v) => ({ plain: plainSkeleton(v), leet: skeleton(v), alphabetic: /^[a-z]+$/i.test(v.replace(/[^a-z0-9]/gi, '')) }))
+    .filter((t) => t.plain.length >= 4);
+
+  if (identities.some((t) => bare.includes(t.plain) || (t.alphabetic && leet.includes(t.leet)))) {
+    errors.push('Not your name or email');
+  }
+
+  // Simple 0-4 score for the strength meter.
+  const satisfied = [
+    password.length >= PASSWORD_MIN_LENGTH,
+    /[A-Z]/.test(password) && /[a-z]/.test(password),
+    /[0-9]/.test(password) && /[^A-Za-z0-9]/.test(password),
+    password.length >= 16,
+  ].filter(Boolean).length;
+
+  return { ok: errors.length === 0, errors, score: errors.length === 0 ? Math.max(2, satisfied) : satisfied };
 }
 
 /* ─── Rooms ─────────────────────────────────────────────────── */

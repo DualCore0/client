@@ -3,13 +3,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { getSubmissions, getMe, getRooms, initialsOf, percent } from '@/lib/api';
+import { getSubmissions, getMe, getRooms, initialsOf, logoutAll, percent } from '@/lib/api';
 import { useAuth, useRequireAuth } from '@/components/AuthProvider';
+import { useToast } from '@/components/ToastProvider';
 import { BottomNav, TopBar } from '@/components/BottomNav';
 import { EmptyState, LoadingState, StatCard } from '@/components/States';
 
 export default function ProfilePage() {
   const router = useRouter();
+  const toast = useToast();
   const { ready } = useRequireAuth();
   const { user, signOut, refresh } = useAuth();
 
@@ -20,6 +22,7 @@ export default function ProfilePage() {
     best: null,
   });
   const [loading, setLoading] = useState(true);
+  const [signingOutEverywhere, setSigningOutEverywhere] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -54,6 +57,23 @@ export default function ProfilePage() {
   const handleSignOut = () => {
     signOut();
     router.replace('/login');
+  };
+
+  /**
+   * Revokes every session and invalidates all outstanding access tokens, so a
+   * stolen token stops working immediately.
+   */
+  const handleSignOutEverywhere = async () => {
+    setSigningOutEverywhere(true);
+    try {
+      const result = await logoutAll();
+      toast.success(`Signed out of ${result.sessionsRevoked} session(s) on all devices.`);
+      signOut();
+      router.replace('/login');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not sign out everywhere.');
+      setSigningOutEverywhere(false);
+    }
   };
 
   return (
@@ -142,6 +162,53 @@ export default function ProfilePage() {
                 <span className="flex-1 font-body-md text-body-md text-on-surface">My rooms</span>
                 <span className="material-symbols-outlined text-on-surface-variant">chevron_right</span>
               </Link>
+            </section>
+
+            {/* Security controls */}
+            <section className="rounded-xl bg-surface-container-lowest border border-surface-container p-5 flex flex-col gap-3">
+              <h3 className="font-headline-sm text-headline-sm text-on-surface flex items-center gap-2">
+                <span className="material-symbols-outlined text-primary text-[20px]">shield_lock</span>
+                Security
+              </h3>
+
+              <div className="flex flex-col gap-1 font-body-sm text-body-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-on-surface-variant">Account status</span>
+                  <span className="inline-flex items-center gap-1 text-tertiary font-medium">
+                    <span className="material-symbols-outlined text-[15px]">verified_user</span>
+                    {(user.status ?? 'ACTIVE').toLowerCase()}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-on-surface-variant">Email verified</span>
+                  <span className={user.emailVerified ? 'text-tertiary' : 'text-on-surface-variant'}>
+                    {user.emailVerified ? 'yes' : 'not yet'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-on-surface-variant">Access tokens</span>
+                  <span className="text-on-surface-variant">short-lived, auto-renewed</span>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                <Link
+                  href="/forgot-password"
+                  className="flex-1 h-10 rounded-lg bg-surface-container-low text-on-surface font-headline-sm text-[13px] flex items-center justify-center gap-1.5"
+                >
+                  <span className="material-symbols-outlined text-[18px]">key</span>
+                  Change password
+                </Link>
+                <button
+                  type="button"
+                  onClick={handleSignOutEverywhere}
+                  disabled={signingOutEverywhere}
+                  className="flex-1 h-10 rounded-lg bg-surface-container-low text-on-surface font-headline-sm text-[13px] flex items-center justify-center gap-1.5 disabled:opacity-60"
+                >
+                  <span className="material-symbols-outlined text-[18px]">devices_other</span>
+                  {signingOutEverywhere ? 'Signing out…' : 'Sign out everywhere'}
+                </button>
+              </div>
             </section>
 
             <button

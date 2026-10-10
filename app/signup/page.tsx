@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { register, type AuthUser, type Role } from "@/lib/api";
+import { register, validatePassword, PASSWORD_MIN_LENGTH, type AuthUser, type Role } from "@/lib/api";
 import { useAuth } from "@/components/AuthProvider";
 
 export default function Signup() {
@@ -25,17 +25,10 @@ export default function Signup() {
 
   const isValidEmail = email.includes("@") && email.includes(".");
   
-  const calculateStrength = (pwd: string) => {
-    let score = 0;
-    if (pwd.length >= 8) score++;
-    if (/[A-Z]/.test(pwd)) score++;
-    if (/[0-9]/.test(pwd)) score++;
-    if (/[^A-Za-z0-9]/.test(pwd)) score++;
-    return score;
-  };
+  // Mirrors the server policy so the user gets feedback before submitting.
+  const policy = validatePassword(password, { email, fullname });
+  const strengthScore = policy.score;
 
-  const strengthScore = calculateStrength(password);
-  
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!fullname.trim()) {
@@ -46,8 +39,8 @@ export default function Signup() {
       setErrorMsg("Valid email address required.");
       return;
     }
-    if (password.length < 8) {
-      setErrorMsg("Password must be at least 8 characters long.");
+    if (!policy.ok) {
+      setErrorMsg(`Password does not meet the security policy: ${policy.errors.join(", ")}.`);
       return;
     }
     if (password !== confirmPassword) {
@@ -253,6 +246,30 @@ export default function Signup() {
                     <div className={`rounded-full transition-colors duration-300 ${strengthScore >= 3 ? (strengthScore === 3 ? 'bg-primary' : 'bg-tertiary') : 'bg-surface-container-high'}`}></div>
                     <div className={`rounded-full transition-colors duration-300 ${strengthScore >= 4 ? 'bg-tertiary' : 'bg-surface-container-high'}`}></div>
                   </div>
+
+                  {/* Live policy checklist — the server enforces the same rules. */}
+                  {password.length > 0 && (
+                    <ul className="pt-1 flex flex-col gap-0.5">
+                      {policy.ok ? (
+                        <li className="flex items-center gap-1.5 font-body-sm text-[12px] text-tertiary">
+                          <span className="material-symbols-outlined text-[14px]">verified_user</span>
+                          Meets the institution password policy
+                        </li>
+                      ) : (
+                        policy.errors.map((issue) => (
+                          <li key={issue} className="flex items-center gap-1.5 font-body-sm text-[12px] text-on-surface-variant">
+                            <span className="material-symbols-outlined text-[14px] text-error">cancel</span>
+                            {issue}
+                          </li>
+                        ))
+                      )}
+                      {password.length < PASSWORD_MIN_LENGTH && (
+                        <li className="font-body-sm text-[11px] text-on-surface-variant pl-5">
+                          Minimum {PASSWORD_MIN_LENGTH} characters
+                        </li>
+                      )}
+                    </ul>
+                  )}
                 </div>
               </div>
 

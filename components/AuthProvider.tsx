@@ -15,6 +15,7 @@ import {
   clearToken,
   getMe,
   getToken,
+  logout as logoutRequest,
   setToken,
   type AuthUser,
   type Role,
@@ -72,6 +73,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const signOut = useCallback(() => {
+    // Revoke the refresh session server-side so the cookie cannot be reused,
+    // but never block the UI on the network.
+    void logoutRequest().catch(() => undefined);
     clearToken();
     setUser(null);
   }, []);

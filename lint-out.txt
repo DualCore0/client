@@ -3,7 +3,4 @@
 33:9  Warning: Block is not recommended. See: https://nextjs.org/docs/messages/google-font-display  @next/next/google-font-display
 33:9  Warning: Custom fonts not added in `pages/_document.js` will only load for a single page. This is discouraged. See: https://nextjs.org/docs/messages/no-page-custom-font  @next/next/no-page-custom-font
 
-./app/login/LoginClient.tsx
-26:51  Warning: The ref value 'timerRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'timerRef.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
-
 info  - Need to disable some ESLint rules? Learn more here: https://nextjs.org/docs/basic-features/eslint#disabling-rules
