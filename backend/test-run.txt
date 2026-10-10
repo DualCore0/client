@@ -14,20 +14,26 @@ At line:1 char:1
 
  RUN  v4.1.11 C:/Users/Akshit/OneDrive/Desktop/hackthon/backend
 
- ✓ src/common/question-generator.spec.ts (16 tests) 30ms
- ✓ src/app.controller.spec.ts (1 test) 603ms
-       ✓ reports the service as ok with a timestamp  599ms
- ✓ src/users/users.service.spec.ts (7 tests) 722ms
-     ✓ is defined  614ms
- ✓ src/leaderboard/leaderboard.service.spec.ts (11 tests) 793ms
-     ✓ is defined  628ms
- ✓ src/submissions/submissions.service.spec.ts (19 tests) 892ms
-     ✓ is defined  623ms
- ✓ src/rooms/rooms.service.spec.ts (11 tests) 856ms
-     ✓ is defined  639ms
- ✓ src/auth/auth.service.spec.ts (6 tests) 1003ms
-     ✓ is defined  642ms
-       ✓ hashes the password and never returns it  309ms
+ ✓ src/common/security/password-policy.spec.ts (12 tests) 22ms
+stderr | src/common/config/env.validation.spec.ts > validateEnv > requires TLS on the database URL in production
+[env] warning: APP_ENCRYPTION_KEY is not set — two-factor secrets cannot be stored securely
+[env] warning: APP_ENCRYPTION_KEY is not set — two-factor secrets cannot be stored securely
+
+stderr | src/common/config/env.validation.spec.ts > validateEnv > requires an explicit CORS origin in production
+[env] warning: APP_ENCRYPTION_KEY is not set — two-factor secrets cannot be stored securely
+
+ ✓ src/common/config/env.validation.spec.ts (14 tests) 29ms
+ ✓ src/common/question-generator.spec.ts (16 tests) 32ms
+ ✓ src/app.controller.spec.ts (1 test) 587ms
+       ✓ reports the service as ok with a timestamp  582ms
+ ✓ src/users/users.service.spec.ts (12 tests) 809ms
+     ✓ is defined  573ms
+ ✓ src/leaderboard/leaderboard.service.spec.ts (11 tests) 806ms
+     ✓ is defined  616ms
+ ✓ src/rooms/rooms.service.spec.ts (11 tests) 835ms
+     ✓ is defined  611ms
+ ✓ src/submissions/submissions.service.spec.ts (19 tests) 930ms
+     ✓ is defined  606ms
 stderr | src/tests/tests.service.spec.ts > TestsService > generateTest > falls back to offline questions when no LLM 
 key is configured
 Qdrant search failed, proceeding without context
@@ -72,6 +78,8 @@ stderr | src/tests/tests.service.spec.ts
 Failed to obtain server version. Unable to check client-server compatibility. Set checkCompatibility=false to skip 
 version check.
 
+ ✓ src/rooms/rooms.controller.spec.ts (5 tests) 520ms
+     ✓ is defined  479ms
 stderr | src/tests/tests.service.spec.ts
 Failed to obtain server version. Unable to check client-server compatibility. Set checkCompatibility=false to skip 
 version check.
@@ -104,16 +112,15 @@ stderr | src/tests/tests.service.spec.ts
 Failed to obtain server version. Unable to check client-server compatibility. Set checkCompatibility=false to skip 
 version check.
 
- ✓ src/tests/tests.service.spec.ts (18 tests) 880ms
-     ✓ is defined  603ms
- ✓ src/submissions/submissions.controller.spec.ts (3 tests) 595ms
-     ✓ is defined  566ms
- ✓ src/rooms/rooms.controller.spec.ts (5 tests) 606ms
-     ✓ is defined  565ms
- ✓ src/auth/auth.controller.spec.ts (4 tests) 599ms
-     ✓ is defined  566ms
- ✓ src/documents/documents.controller.spec.ts (4 tests) 74ms
-stderr | src/documents/documents.service.spec.ts > DocumentsService
+ ✓ src/tests/tests.service.spec.ts (18 tests) 818ms
+     ✓ is defined  558ms
+ ✓ src/submissions/submissions.controller.spec.ts (3 tests) 534ms
+     ✓ is defined  509ms
+ ✓ src/documents/documents.controller.spec.ts (4 tests) 65ms
+ ✓ src/tests/tests.controller.spec.ts (4 tests) 445ms
+     ✓ is defined  410ms
+stderr | src/documents/documents.service.spec.ts > DocumentsService > uploadAndProcess > writes an audit entry for the 
+upload
 Failed to process PDF doc-1: InvalidPDFException: Invalid PDF structure.
     at getException (file:///C:/Users/Akshit/OneDrive/Desktop/hackthon/backend/node_modules/pdf-parse/dist/pdf-parse/es
 m/Exception.js:197:24)
@@ -123,7 +130,7 @@ sm/PDFParse.js:159:19)
     at PDFParse.getText (file:///C:/Users/Akshit/OneDrive/Desktop/hackthon/backend/node_modules/pdf-parse/dist/pdf-pars
 e/esm/PDFParse.js:122:21)
     at DocumentsService.processPdfBg 
-(C:/Users/Akshit/OneDrive/Desktop/hackthon/backend/src/documents/documents.service.ts:107:22) {
+(C:/Users/Akshit/OneDrive/Desktop/hackthon/backend/src/documents/documents.service.ts:125:22) {
   [cause]: Error: 
       at BaseExceptionClosure 
 (file:///C:/Users/Akshit/OneDrive/Desktop/hackthon/backend/node_modules/pdfjs-dist/legacy/build/pdf.mjs:6418:29)
@@ -145,50 +152,40 @@ e/esm/PDFParse.js:122:21)
   }
 }
 
- ✓ src/tests/tests.controller.spec.ts (4 tests) 530ms
-     ✓ is defined  497ms
-stderr | src/documents/documents.service.spec.ts
-Error checking qdrant collections: [TypeError: fetch failed] {
-  [cause]: AggregateError: 
-      at internalConnectMultiple (node:net:1426:18)
-      at afterConnectMultiple (node:net:2095:7) {
-    code: 'ECONNREFUSED',
-    [errors]: [ [Error], [Error] ]
+stderr | src/documents/documents.service.spec.ts > DocumentsService > uploadAndProcess
+Failed to process PDF doc-1: InvalidPDFException: Invalid PDF structure.
+    at getException (file:///C:/Users/Akshit/OneDrive/Desktop/hackthon/backend/node_modules/pdf-parse/dist/pdf-parse/es
+m/Exception.js:197:24)
+    at PDFParse.load (file:///C:/Users/Akshit/OneDrive/Desktop/hackthon/backend/node_modules/pdf-parse/dist/pdf-parse/e
+sm/PDFParse.js:159:19)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at PDFParse.getText (file:///C:/Users/Akshit/OneDrive/Desktop/hackthon/backend/node_modules/pdf-parse/dist/pdf-pars
+e/esm/PDFParse.js:122:21)
+    at DocumentsService.processPdfBg 
+(C:/Users/Akshit/OneDrive/Desktop/hackthon/backend/src/documents/documents.service.ts:125:22) {
+  [cause]: Error: 
+      at BaseExceptionClosure 
+(file:///C:/Users/Akshit/OneDrive/Desktop/hackthon/backend/node_modules/pdfjs-dist/legacy/build/pdf.mjs:6418:29)
+      at file:///C:/Users/Akshit/OneDrive/Desktop/hackthon/backend/node_modules/pdfjs-dist/legacy/build/pdf.mjs:6421:2
+      at ModuleJob.run (node:internal/modules/esm/module_job:569:25)
+      at processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at node:internal/modules/esm/loader:650:26
+      at VitestModuleEvaluator.runExternalModule 
+(file:///C:/Users/Akshit/OneDrive/Desktop/hackthon/backend/node_modules/vitest/dist/module-evaluator.js:80:21)
+      at VitestModuleRunner.directRequest 
+(file:///C:/Users/Akshit/OneDrive/Desktop/hackthon/backend/node_modules/vite/dist/node/module-runner.js:1249:18)
+      at VitestModuleRunner.cachedRequest 
+(file:///C:/Users/Akshit/OneDrive/Desktop/hackthon/backend/node_modules/vite/dist/node/module-runner.js:1193:73)
+      at C:/Users/Akshit/OneDrive/Desktop/hackthon/backend/src/documents/documents.service.ts:5:1
+      at VitestModuleEvaluator._runInlinedModule 
+(file:///C:/Users/Akshit/OneDrive/Desktop/hackthon/backend/node_modules/vitest/dist/module-evaluator.js:206:4) {
+    message: 'Invalid PDF structure.',
+    name: 'InvalidPDFException'
   }
 }
 
-stderr | src/documents/documents.service.spec.ts
-Failed to obtain server version. Unable to check client-server compatibility. Set checkCompatibility=false to skip 
-version check.
-
-stderr | src/documents/documents.service.spec.ts
-Failed to obtain server version. Unable to check client-server compatibility. Set checkCompatibility=false to skip 
-version check.
-
-stderr | src/documents/documents.service.spec.ts
-Error checking qdrant collections: [TypeError: fetch failed] {
-  [cause]: AggregateError: 
-      at internalConnectMultiple (node:net:1426:18)
-      at afterConnectMultiple (node:net:2095:7) {
-    code: 'ECONNREFUSED',
-    [errors]: [ [Error], [Error] ]
-  }
-}
-
-stderr | src/documents/documents.service.spec.ts
-Failed to obtain server version. Unable to check client-server compatibility. Set checkCompatibility=false to skip 
-version check.
-
-stderr | src/documents/documents.service.spec.ts
-Error checking qdrant collections: [TypeError: fetch failed] {
-  [cause]: AggregateError: 
-      at internalConnectMultiple (node:net:1426:18)
-      at afterConnectMultiple (node:net:2095:7) {
-    code: 'ECONNREFUSED',
-    [errors]: [ [Error], [Error] ]
-  }
-}
-
+ ✓ src/auth/auth.controller.spec.ts (14 tests) 561ms
+     ✓ is defined  460ms
 stderr | src/documents/documents.service.spec.ts
 Failed to obtain server version. Unable to check client-server compatibility. Set checkCompatibility=false to skip 
 version check.
@@ -287,22 +284,150 @@ Error checking qdrant collections: [TypeError: fetch failed] {
   }
 }
 
- ✓ src/documents/documents.service.spec.ts (10 tests) 855ms
-     ✓ is defined  571ms
+stderr | src/documents/documents.service.spec.ts
+Failed to obtain server version. Unable to check client-server compatibility. Set checkCompatibility=false to skip 
+version check.
+
+stderr | src/documents/documents.service.spec.ts
+Error checking qdrant collections: [TypeError: fetch failed] {
+  [cause]: AggregateError: 
+      at internalConnectMultiple (node:net:1426:18)
+      at afterConnectMultiple (node:net:2095:7) {
+    code: 'ECONNREFUSED',
+    [errors]: [ [Error], [Error] ]
+  }
+}
+
+stderr | src/documents/documents.service.spec.ts
+Failed to obtain server version. Unable to check client-server compatibility. Set checkCompatibility=false to skip 
+version check.
+
+stderr | src/documents/documents.service.spec.ts
+Error checking qdrant collections: [TypeError: fetch failed] {
+  [cause]: AggregateError: 
+      at internalConnectMultiple (node:net:1426:18)
+      at afterConnectMultiple (node:net:2095:7) {
+    code: 'ECONNREFUSED',
+    [errors]: [ [Error], [Error] ]
+  }
+}
+
+stderr | src/documents/documents.service.spec.ts
+Failed to obtain server version. Unable to check client-server compatibility. Set checkCompatibility=false to skip 
+version check.
+
+stderr | src/documents/documents.service.spec.ts
+Error checking qdrant collections: [TypeError: fetch failed] {
+  [cause]: AggregateError: 
+      at internalConnectMultiple (node:net:1426:18)
+      at afterConnectMultiple (node:net:2095:7) {
+    code: 'ECONNREFUSED',
+    [errors]: [ [Error], [Error] ]
+  }
+}
+
+stderr | src/documents/documents.service.spec.ts
+Failed to obtain server version. Unable to check client-server compatibility. Set checkCompatibility=false to skip 
+version check.
+
+stderr | src/documents/documents.service.spec.ts
+Error checking qdrant collections: [TypeError: fetch failed] {
+  [cause]: AggregateError: 
+      at internalConnectMultiple (node:net:1426:18)
+      at afterConnectMultiple (node:net:2095:7) {
+    code: 'ECONNREFUSED',
+    [errors]: [ [Error], [Error] ]
+  }
+}
+
+stderr | src/documents/documents.service.spec.ts
+Failed to obtain server version. Unable to check client-server compatibility. Set checkCompatibility=false to skip 
+version check.
+
+stderr | src/documents/documents.service.spec.ts
+Error checking qdrant collections: [TypeError: fetch failed] {
+  [cause]: AggregateError: 
+      at internalConnectMultiple (node:net:1426:18)
+      at afterConnectMultiple (node:net:2095:7) {
+    code: 'ECONNREFUSED',
+    [errors]: [ [Error], [Error] ]
+  }
+}
+
+stderr | src/documents/documents.service.spec.ts
+Failed to obtain server version. Unable to check client-server compatibility. Set checkCompatibility=false to skip 
+version check.
+
+stderr | src/documents/documents.service.spec.ts
+Error checking qdrant collections: [TypeError: fetch failed] {
+  [cause]: AggregateError: 
+      at internalConnectMultiple (node:net:1426:18)
+      at afterConnectMultiple (node:net:2095:7) {
+    code: 'ECONNREFUSED',
+    [errors]: [ [Error], [Error] ]
+  }
+}
+
+stderr | src/documents/documents.service.spec.ts
+Failed to obtain server version. Unable to check client-server compatibility. Set checkCompatibility=false to skip 
+version check.
+
+stderr | src/documents/documents.service.spec.ts
+Error checking qdrant collections: [TypeError: fetch failed] {
+  [cause]: AggregateError: 
+      at internalConnectMultiple (node:net:1426:18)
+      at afterConnectMultiple (node:net:2095:7) {
+    code: 'ECONNREFUSED',
+    [errors]: [ [Error], [Error] ]
+  }
+}
+
+stderr | src/documents/documents.service.spec.ts
+Failed to obtain server version. Unable to check client-server compatibility. Set checkCompatibility=false to skip 
+version check.
+
+stderr | src/documents/documents.service.spec.ts
+Error checking qdrant collections: [TypeError: fetch failed] {
+  [cause]: AggregateError: 
+      at internalConnectMultiple (node:net:1426:18)
+      at afterConnectMultiple (node:net:2095:7) {
+    code: 'ECONNREFUSED',
+    [errors]: [ [Error], [Error] ]
+  }
+}
+
+ ✓ src/documents/documents.service.spec.ts (15 tests) 823ms
+     ✓ is defined  511ms
+ ✓ src/auth/auth.service.spec.ts (29 tests) 2057ms
+     ✓ is defined  657ms
 ⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
 
-Vitest caught 1 unhandled error during the test run.
+Vitest caught 2 unhandled errors during the test run.
 This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
 
 ⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
 TypeError: Cannot read properties of undefined (reading 'catch')
- ❯ src/documents/documents.service.ts:55:102
-     53|     this.processPdfBg(file.buffer, doc.id, roomId).catch(e => {
-     54|       console.error(`Failed to process PDF ${doc.id}:`, e);
-     55|       this.prisma.document.update({ where: { id: doc.id }, data: { sta…
-       |                                                                                                      ^
-     56|     });
-     57|
+ ❯ src/documents/documents.service.ts:72:84
+     70|       console.error(`Failed to process PDF ${doc.id}:`, e);
+     71|       await this.prisma.document
+     72|         .update({ where: { id: doc.id }, data: { status: DocumentStatu…
+       |                                                                                    ^
+     73|         .catch(console.error);
+     74|     });
+ ❯ processTicksAndRejections node:internal/process/task_queues:104:5
+
+This error originated in "src/documents/documents.service.spec.ts" test file. It doesn't mean the error was thrown 
+inside the file itself, but while it was running.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+TypeError: Cannot read properties of undefined (reading 'catch')
+ ❯ src/documents/documents.service.ts:72:84
+     70|       console.error(`Failed to process PDF ${doc.id}:`, e);
+     71|       await this.prisma.document
+     72|         .update({ where: { id: doc.id }, data: { status: DocumentStatu…
+       |                                                                                    ^
+     73|         .catch(console.error);
+     74|     });
  ❯ processTicksAndRejections node:internal/process/task_queues:104:5
 
 This error originated in "src/documents/documents.service.spec.ts" test file. It doesn't mean the error was thrown 
@@ -310,9 +435,9 @@ inside the file itself, but while it was running.
 ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
 
 
- Test Files  14 passed (14)
-      Tests  119 passed (119)
-     Errors  1 error
-   Start at  17:25:49
-   Duration  4.70s (transform 2.46s, setup 0ms, import 33.52s, tests 9.04s, environment 7ms)
+ Test Files  16 passed (16)
+      Tests  188 passed (188)
+     Errors  2 errors
+   Start at  20:04:37
+   Duration  5.18s (transform 2.55s, setup 0ms, import 35.34s, tests 9.87s, environment 6ms)
 

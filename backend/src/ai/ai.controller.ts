@@ -5,13 +5,15 @@ import { GenerateTestDto } from './ai.dto.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { RolesGuard, Roles } from '../auth/roles.guard.js';
 import { Role } from '@prisma/client';
+import { throttle } from '../common/config/throttle.js';
 
 @Controller('ai')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AiController {
   constructor(private readonly aiService: AiService) {}
 
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  // LLM calls are expensive and abusable, so they get the tightest budget.
+  @Throttle(throttle.expensive())
   @Post('generate-test')
   @Roles(Role.TEACHER)
   async generateTest(@Body() body: GenerateTestDto, @Request() req: any) {

@@ -1,11 +1,12 @@
-import { Injectable, InternalServerErrorException, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma.service.js';
 import { ConfigService } from '@nestjs/config';
 import { QdrantClient } from '@qdrant/js-client-rest';
 import { PDFParse } from 'pdf-parse';
 import { DocumentStatus } from '@prisma/client';
-import * as fs from 'fs';
-import * as path from 'path';
+import { createHash } from 'node:crypto';
+import { AuditService } from '../common/security/audit.service.js';
+import { validatePdfUpload } from '../common/security/file-validation.js';
 
 @Injectable()
 export class DocumentsService {
@@ -14,6 +15,7 @@ export class DocumentsService {
   constructor(
     private prisma: PrismaService,
     private configService: ConfigService,
+    private audit: AuditService,
   ) {
     this.qdrantClient = new QdrantClient({
       url: this.configService.get<string>('QDRANT_URL') || 'http://localhost:6333',
@@ -32,27 +34,43 @@ export class DocumentsService {
   }
 
   async uploadAndProcess(file: any, roomId: string, userId: string) {
-    // 1. Verify access
+    // 1. Verify access before touching the file.
     const room = await this.prisma.room.findUnique({ where: { id: roomId } });
     if (!room) throw new NotFoundException('Room not found');
     if (room.teacherId !== userId) throw new ForbiddenException('Only the room teacher can upload');
-    if (file.mimetype !== 'application/pdf') throw new BadRequestException('Only PDF files are allowed');
 
-    // 2. Save document record as PROCESSING
+    // 2. Content-based validation (magic bytes, size, no active content).
+    const safe = validatePdfUpload(file);
+    const fileHash = createHash('sha256').update(safe.buffer).digest('hex');
+
+    // 3. Save document record as PROCESSING.
     const doc = await this.prisma.document.create({
       data: {
         roomId,
-        fileName: file.originalname,
+        fileName: safe.originalname,
         fileUrl: '', // In a real app, upload to S3. For MVP, we just process it directly.
+        fileHash,
+        fileSize: safe.size,
+        mimeType: safe.mimetype,
         uploadedBy: userId,
         status: DocumentStatus.PROCESSING,
-      }
+      },
     });
 
-    // 3. Process PDF asynchronously
-    this.processPdfBg(file.buffer, doc.id, roomId).catch(e => {
+    await this.audit.record({
+      action: 'document.uploaded',
+      actorId: userId,
+      entity: 'Document',
+      entityId: doc.id,
+      metadata: { roomId, fileName: safe.originalname, size: safe.size, sha256: fileHash },
+    });
+
+    // 4. Process PDF asynchronously.
+    this.processPdfBg(safe.buffer, doc.id, roomId).catch(async (e) => {
       console.error(`Failed to process PDF ${doc.id}:`, e);
-      this.prisma.document.update({ where: { id: doc.id }, data: { status: DocumentStatus.FAILED } }).catch(console.error);
+      await this.prisma.document
+        .update({ where: { id: doc.id }, data: { status: DocumentStatus.FAILED } })
+        .catch(console.error);
     });
 
     return doc;

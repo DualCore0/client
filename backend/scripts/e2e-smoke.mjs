@@ -27,25 +27,25 @@ async function req(method, path, { token, body, raw } = {}) {
 
 const suffix = Date.now().toString().slice(-6);
 
-/* ── health ─────────────────────────────────────────────────── */
+/* â”€â”€ health â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 {
   const r = await req('GET', '/health');
   log('GET /health', r.status === 200 && r.body?.status === 'ok');
 }
 
-/* ── teacher signup ─────────────────────────────────────────── */
+/* â”€â”€ teacher signup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 const teacherEmail = `teacher.${suffix}@example.com`;
 const studentEmail = `student.${suffix}@example.com`;
 
 const tReg = await req('POST', '/auth/register', {
-  body: { email: teacherEmail, password: 'password123', fullname: 'Test Teacher', role: 'TEACHER' },
+  body: { email: teacherEmail, password: 'Secur3!Passphrase', fullname: 'Test Teacher', role: 'TEACHER' },
 });
 log('POST /auth/register (teacher)', tReg.status === 201 && !!tReg.body?.access_token, `status=${tReg.status}`);
 const teacherToken = tReg.body?.access_token;
 
 {
   const dup = await req('POST', '/auth/register', {
-    body: { email: teacherEmail, password: 'password123', fullname: 'Dupe', role: 'TEACHER' },
+    body: { email: teacherEmail, password: 'Secur3!Passphrase', fullname: 'Dupe', role: 'TEACHER' },
   });
   log('duplicate email rejected', dup.status === 409, `status=${dup.status}`);
 }
@@ -57,16 +57,16 @@ const teacherToken = tReg.body?.access_token;
   log('invalid register body rejected', bad.status === 400, `status=${bad.status}`);
 }
 
-/* ── student signup ─────────────────────────────────────────── */
+/* â”€â”€ student signup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 const sReg = await req('POST', '/auth/register', {
-  body: { email: studentEmail, password: 'password123', fullname: 'Test Student', role: 'STUDENT' },
+  body: { email: studentEmail, password: 'Secur3!Passphrase', fullname: 'Test Student', role: 'STUDENT' },
 });
 log('POST /auth/register (student)', sReg.status === 201 && !!sReg.body?.access_token, `status=${sReg.status}`);
 const studentToken = sReg.body?.access_token;
 
-/* ── login + me ─────────────────────────────────────────────── */
+/* â”€â”€ login + me â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 {
-  const r = await req('POST', '/auth/login', { body: { email: teacherEmail, password: 'password123' } });
+  const r = await req('POST', '/auth/login', { body: { email: teacherEmail, password: 'Secur3!Passphrase' } });
   log('POST /auth/login', r.status === 200 && !!r.body?.access_token, `status=${r.status}`);
 }
 {
@@ -78,7 +78,7 @@ const studentToken = sReg.body?.access_token;
   log('GET /auth/me', r.status === 200 && r.body?.role === 'TEACHER', JSON.stringify(r.body)?.slice(0, 120));
 }
 
-/* ── role guards ────────────────────────────────────────────── */
+/* â”€â”€ role guards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 {
   const r = await req('POST', '/rooms', { token: studentToken, body: { name: 'Nope' } });
   log('student cannot create a room', r.status === 403, `status=${r.status}`);
@@ -88,7 +88,7 @@ const studentToken = sReg.body?.access_token;
   log('student can list tests', r.status === 200, `status=${r.status}`);
 }
 
-/* ── create room ────────────────────────────────────────────── */
+/* â”€â”€ create room â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 const roomRes = await req('POST', '/rooms', {
   token: teacherToken,
   body: { name: 'Integration Test Room', subject: 'QA', description: 'created by e2e smoke test' },
@@ -100,7 +100,7 @@ const room = roomRes.body;
   log('room without a name rejected', r.status === 400, `status=${r.status}`);
 }
 
-/* ── public room preview + code lookup ──────────────────────── */
+/* â”€â”€ public room preview + code lookup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 {
   const r = await req('GET', `/public/rooms/${room.code}`);
   log('GET /public/rooms/:code (no auth)', r.status === 200 && r.body?.code === room.code, `status=${r.status}`);
@@ -120,7 +120,7 @@ const room = roomRes.body;
   log('unknown room code => 404', r.status === 404, `status=${r.status}`);
 }
 
-/* ── join room ──────────────────────────────────────────────── */
+/* â”€â”€ join room â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 {
   const r = await req('POST', '/rooms/join', { token: studentToken, body: { code: room.code.toLowerCase() } });
   log('POST /rooms/join (lowercase code)', r.status === 201, `status=${r.status}`);
@@ -134,7 +134,7 @@ const room = roomRes.body;
   log('unknown code => 404', r.status === 404, `status=${r.status}`);
 }
 
-/* ── documents ──────────────────────────────────────────────── */
+/* â”€â”€ documents â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 {
   const r = await req('GET', `/documents/room/${room.id}`, { token: teacherToken });
   log('GET /documents/room/:roomId (empty)', r.status === 200 && Array.isArray(r.body), `count=${r.body?.length}`);
@@ -154,7 +154,7 @@ const room = roomRes.body;
   log('student cannot list room documents', r.status === 403, `status=${r.status}`);
 }
 
-/* ── generate a test directly, publish it ───────────────────── */
+/* â”€â”€ generate a test directly, publish it â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 const gen = await req('POST', '/tests/generate', {
   token: teacherToken,
   body: { topic: 'Relational databases', roomId: room.id, questionCount: 5 },
@@ -208,7 +208,7 @@ if (testId) {
     log('double publish rejected', r.status === 400, `status=${r.status}`);
   }
 
-  /* ── student takes the test ───────────────────────────────── */
+  /* â”€â”€ student takes the test â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   {
     const r = await req('GET', `/tests/${testId}`, { token: studentToken });
     const leaks = r.body?.questions?.some((x) => 'correctAnswer' in x && x.correctAnswer !== undefined);
@@ -255,7 +255,7 @@ if (testId) {
     log('cannot restart a submitted test', r.status === 400, `status=${r.status}`);
   }
 
-  /* ── result + review ──────────────────────────────────────── */
+  /* â”€â”€ result + review â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   if (submissionId) {
     const r = await req('GET', `/submissions/${submissionId}`, { token: studentToken });
     log('GET /submissions/:id', r.status === 200 && r.body?.percentage === 100, `status=${r.status}`);
@@ -271,7 +271,7 @@ if (testId) {
     log('GET /submissions/me includes the attempt', r.status === 200 && found, `count=${r.body?.length}`);
   }
 
-  /* ── teacher results ──────────────────────────────────────── */
+  /* â”€â”€ teacher results â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   {
     const r = await req('GET', `/tests/${testId}/results`, { token: teacherToken });
     log(
@@ -285,7 +285,7 @@ if (testId) {
     log('student cannot read test results', r.status === 403, `status=${r.status}`);
   }
 
-  /* ── question editing ─────────────────────────────────────── */
+  /* â”€â”€ question editing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   if (key[0]) {
     const edited = await req('PATCH', `/tests/${testId}/questions/${key[0].questionId}`, {
       token: teacherToken,
@@ -298,7 +298,7 @@ if (testId) {
   }
 }
 
-/* ── leaderboards ───────────────────────────────────────────── */
+/* â”€â”€ leaderboards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 {
   const r = await req('GET', `/leaderboard/room/${room.code}`, { token: studentToken });
   const entry = r.body?.leaderboard?.find((e) => e.studentId === sReg.body?.user?.id);
@@ -327,7 +327,7 @@ if (testId) {
   );
 }
 
-/* ── public profile ─────────────────────────────────────────── */
+/* â”€â”€ public profile â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 {
   const r = await req('GET', `/users/${sReg.body?.user?.id}`, { token: teacherToken });
   log(
@@ -342,13 +342,13 @@ if (testId) {
   log('unauthorised profile request rejected', r.status === 401, `status=${r.status}`);
 }
 
-/* ── cleanup the throwaway room ─────────────────────────────── */
+/* â”€â”€ cleanup the throwaway room â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 {
   const r = await req('POST', '/ai/generate-test', { token: teacherToken, body: {} });
   log('POST /ai/generate-test validates its body', r.status === 400, `status=${r.status}`);
 }
 
-/* ── summary ────────────────────────────────────────────────── */
+/* â”€â”€ summary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
 if (failed.length) {

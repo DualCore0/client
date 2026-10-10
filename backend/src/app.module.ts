@@ -1,9 +1,15 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
-import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
+import { PrismaModule } from './prisma.module.js';
+import { SecurityModule } from './common/security/security.module.js';
+import { validateEnv } from './common/config/env.validation.js';
+import { globalThrottleLimit } from './common/config/throttle.js';
+
 import { UsersModule } from './users/users.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { TestsModule } from './tests/tests.module.js';
@@ -15,11 +21,26 @@ import { LeaderboardModule } from './leaderboard/leaderboard.module.js';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
-    ThrottlerModule.forRoot([{
-      ttl: 60000,
-      limit: 100, // 100 requests per minute by default
-    }]),
+    ConfigModule.forRoot({
+      isGlobal: true,
+      // Refuses to boot on a missing/weak secret instead of failing later.
+      validate: validateEnv,
+      cache: true,
+    }),
+
+    // Global infrastructure.
+    PrismaModule,
+    SecurityModule,
+
+    ThrottlerModule.forRoot([
+      {
+        // Global default; sensitive routes narrow this with @Throttle().
+        name: 'default',
+        ttl: 60_000,
+        limit: globalThrottleLimit(),
+      },
+    ]),
+
     UsersModule,
     AuthModule,
     TestsModule,
@@ -34,8 +55,8 @@ import { LeaderboardModule } from './leaderboard/leaderboard.module.js';
     AppService,
     {
       provide: APP_GUARD,
-      useClass: ThrottlerGuard
-    }
+      useClass: ThrottlerGuard,
+    },
   ],
 })
 export class AppModule {}

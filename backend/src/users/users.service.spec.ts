@@ -35,14 +35,73 @@ describe('UsersService', () => {
     expect(user).toMatchObject({ email: 'a@b.com', password: 'hashed', role: 'STUDENT' });
   });
 
+  it('lower-cases the email on create so the CHECK constraint holds', async () => {
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.create.mockImplementation(async ({ data }: any) => ({ id: 'u1', ...data }));
+
+    await service.create('  MiXeD@Example.COM ', 'hashed', 'A');
+
+    expect(prisma.user.create.mock.calls[0][0].data.email).toBe('mixed@example.com');
+  });
+
+  describe('soft delete awareness', () => {
+    it('findByEmail excludes soft-deleted accounts', async () => {
+      prisma.user.findFirst.mockResolvedValue(null);
+      await service.findByEmail('gone@example.com');
+
+      expect(prisma.user.findFirst).toHaveBeenCalledWith({
+        where: { email: 'gone@example.com', deletedAt: null },
+      });
+    });
+
+    it('findById excludes soft-deleted accounts', async () => {
+      prisma.user.findFirst.mockResolvedValue(null);
+      await service.findById('u1');
+
+      expect(prisma.user.findFirst).toHaveBeenCalledWith({
+        where: { id: 'u1', deletedAt: null },
+      });
+    });
+
+    it('softDelete marks the row, revokes sessions and bumps the token version', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'u1', email: 'a@b.com' });
+      prisma.user.update.mockResolvedValue({ id: 'u1' });
+      prisma.session.updateMany.mockResolvedValue({ count: 3 });
+      prisma.auditLog.create.mockResolvedValue({ id: 'audit-1' });
+
+      const result = await service.softDelete('u1', 'admin-1');
+
+      expect(result.success).toBe(true);
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'DELETED',
+            tokenVersion: { increment: 1 },
+          }),
+        }),
+      );
+      expect(prisma.session.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { userId: 'u1', revokedAt: null },
+          data: expect.objectContaining({ revokedReason: 'account_deleted' }),
+        }),
+      );
+    });
+
+    it('softDelete refuses an already deleted account', async () => {
+      prisma.user.findFirst.mockResolvedValue(null);
+      await expect(service.softDelete('u1')).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
   describe('getPublicProfile', () => {
     it('throws for an unknown user', async () => {
-      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.user.findFirst.mockResolvedValue(null);
       await expect(service.getPublicProfile('nope')).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('never exposes the email address', async () => {
-      prisma.user.findUnique.mockResolvedValue({
+      prisma.user.findFirst.mockResolvedValue({
         id: 'u1',
         fullname: 'Alice Smith',
         role: 'STUDENT',
@@ -68,7 +127,7 @@ describe('UsersService', () => {
     });
 
     it('reports the room the student is most active in', async () => {
-      prisma.user.findUnique.mockResolvedValue({
+      prisma.user.findFirst.mockResolvedValue({
         id: 'u1',
         fullname: 'Alice',
         role: 'STUDENT',
@@ -94,7 +153,7 @@ describe('UsersService', () => {
     });
 
     it('handles a student with no attempts', async () => {
-      prisma.user.findUnique.mockResolvedValue({
+      prisma.user.findFirst.mockResolvedValue({
         id: 'u1',
         fullname: null,
         role: 'STUDENT',

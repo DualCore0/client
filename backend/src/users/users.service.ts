@@ -6,22 +6,64 @@ import { User, Role } from '@prisma/client';
 export class UsersService {
   constructor(private prisma: PrismaService) {}
 
+  /** Active accounts only — soft-deleted rows are never returned. */
   async findByEmail(email: string): Promise<User | null> {
-    return this.prisma.user.findUnique({ where: { email } });
+    return this.prisma.user.findFirst({
+      where: { email: email.trim().toLowerCase(), deletedAt: null },
+    });
   }
 
+  /** Active accounts only — soft-deleted rows are never returned. */
   async findById(id: string): Promise<User | null> {
-    return this.prisma.user.findUnique({ where: { id } });
+    return this.prisma.user.findFirst({ where: { id, deletedAt: null } });
   }
 
   async create(email: string, passwordHash: string, fullname: string, role: Role = Role.STUDENT): Promise<User> {
-    const existing = await this.findByEmail(email);
+    const normalizedEmail = email.trim().toLowerCase();
+    const existing = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
     if (existing) {
+      // Same message whether the row is live or soft-deleted: no enumeration.
       throw new ConflictException('Email already exists');
     }
     return this.prisma.user.create({
-      data: { email, password: passwordHash, fullname, role },
+      data: { email: normalizedEmail, password: passwordHash, fullname, role },
     });
+  }
+
+  /**
+   * Soft-deletes an account: the row is retained for audit and referential
+   * integrity, all sessions are revoked, and every outstanding access token is
+   * invalidated by bumping `tokenVersion`.
+   */
+  async softDelete(id: string, actorId?: string): Promise<{ success: true }> {
+    const user = await this.prisma.user.findFirst({ where: { id, deletedAt: null } });
+    if (!user) throw new NotFoundException('User not found');
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id },
+        data: {
+          deletedAt: new Date(),
+          status: 'DELETED',
+          tokenVersion: { increment: 1 },
+        },
+      }),
+      this.prisma.session.updateMany({
+        where: { userId: id, revokedAt: null },
+        data: { revokedAt: new Date(), revokedReason: 'account_deleted' },
+      }),
+      this.prisma.auditLog.create({
+        data: {
+          action: 'user.soft_deleted',
+          actorId: actorId ?? null,
+          entity: 'User',
+          entityId: id,
+          actorEmail: user.email,
+        },
+      }),
+    ]);
+
+    return { success: true };
   }
 
   /**
@@ -30,8 +72,8 @@ export class UsersService {
    * rank) plus aggregate counts — never email addresses or raw answers.
    */
   async getPublicProfile(userId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
       select: { id: true, fullname: true, role: true, createdAt: true },
     });
     if (!user) throw new NotFoundException('Student not found');

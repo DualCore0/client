@@ -1,3 +1,20 @@
+// ---------------------------------------------------------------------------
+// ClassRank data model — hardened
+//
+// Security notes:
+//  * Passwords are bcrypt hashes (cost 12) and are never selected by default.
+//  * Emails are stored lower-cased and have a CHECK constraint enforcing it.
+//  * `status` + `deletedAt` implement account lifecycle and soft deletion.
+//  * `failedLoginAttempts` / `lockedUntil` implement brute-force lockout.
+//  * `tokenVersion` invalidates every outstanding JWT (bumped on password
+//    change, sign-out-everywhere, or role change).
+//  * Sessions store only SHA-256 *hashes* of refresh tokens, with rotation
+//    families so a replayed token can be detected and revoked.
+//  * LoginAttempt / AuditLog provide an append-only security trail.
+//  * Row-level security, least-privilege roles, CHECK constraints and audit
+//    triggers are applied on top of this file by prisma/security-hardening.sql.
+// ---------------------------------------------------------------------------
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -10,6 +27,18 @@ generator client {
 enum Role {
   STUDENT
   TEACHER
+  ADMIN
+}
+
+enum UserStatus {
+  /// Registered but email not verified yet.
+  PENDING
+  ACTIVE
+  /// Blocked by an administrator.
+  SUSPENDED
+  /// Temporarily locked after too many failed sign-in attempts.
+  LOCKED
+  DELETED
 }
 
 enum TestStatus {
@@ -25,34 +54,75 @@ enum DocumentStatus {
 }
 
 model User {
-  id              String       @id @default(uuid())
-  email           String       @unique
-  fullname        String?
-  password        String
-  role            Role         @default(STUDENT)
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  id                  String     @id @default(uuid())
+  email               String     @unique
+  fullname            String?
+  /// bcrypt hash. Never returned by any API.
+  password            String
+  role                Role       @default(STUDENT)
+  status              UserStatus @default(ACTIVE)
 
-  roomsCreated    Room[]       @relation("RoomTeacher")
-  roomMemberships RoomMember[]
-  testsCreated    Test[]
-  submissions     Submission[]
-  documents       Document[]
+  emailVerified       Boolean    @default(false)
+  emailVerifiedAt     DateTime?
+
+  /// Brute-force protection.
+  failedLoginAttempts Int        @default(0)
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  lastLoginIp         String?
+  lastFailedLoginAt   DateTime?
+
+  passwordChangedAt   DateTime?
+  mustChangePassword  Boolean    @default(false)
+
+  /// TOTP secret, encrypted at rest with APP_ENCRYPTION_KEY.
+  twoFactorEnabled    Boolean    @default(false)
+  twoFactorSecret     String?
+
+  /// Increment to invalidate all previously issued access tokens.
+  tokenVersion        Int        @default(0)
+
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+  /// Soft delete marker; NULL means the account is live.
+  deletedAt           DateTime?
+
+  roomsCreated        Room[]       @relation("RoomTeacher")
+  roomMemberships     RoomMember[]
+  testsCreated        Test[]
+  submissions         Submission[]
+  documents           Document[]
+  sessions            Session[]
+  auditLogs           AuditLog[]
+  passwordResetTokens PasswordResetToken[]
+  emailVerificationTokens EmailVerificationToken[]
+
+  @@index([role])
+  @@index([status])
+  @@index([createdAt])
+  @@map("User")
 }
 
 model Room {
-  id          String       @id @default(uuid())
-  code        String       @unique
+  id          String   @id @default(uuid())
+  /// 6-character join code, upper-case, unique.
+  code        String   @unique
   name        String
   subject     String?
   description String?
   teacherId   String
-  teacher     User         @relation("RoomTeacher", fields: [teacherId], references: [id])
-  createdAt   DateTime     @default(now())
+  teacher     User     @relation("RoomTeacher", fields: [teacherId], references: [id], onDelete: Restrict)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  archivedAt  DateTime?
 
   members     RoomMember[]
   tests       Test[]
   documents   Document[]
+
+  @@index([teacherId])
+  @@index([createdAt])
+  @@map("Room")
 }
 
 model RoomMember {
@@ -64,44 +134,63 @@ model RoomMember {
   joinedAt  DateTime @default(now())
 
   @@unique([roomId, studentId])
+  @@index([studentId])
+  @@map("RoomMember")
 }
 
 model Document {
-  id          String         @id @default(uuid())
-  roomId      String
-  room        Room           @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  fileName    String
-  fileUrl     String
-  status      DocumentStatus @default(PROCESSING)
-  extractedText String?      @db.Text
-  chunkCount  Int            @default(0)
-  error       String?        @db.Text
-  uploadedBy  String
-  uploader    User           @relation(fields: [uploadedBy], references: [id])
-  createdAt   DateTime       @default(now())
+  id            String         @id @default(uuid())
+  roomId        String
+  room          Room           @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  fileName      String
+  fileUrl       String
+  /// SHA-256 of the uploaded bytes, used for integrity + duplicate detection.
+  fileHash      String?
+  fileSize      Int?
+  mimeType      String?
+  status        DocumentStatus @default(PROCESSING)
+  extractedText String?        @db.Text
+  chunkCount    Int            @default(0)
+  error         String?        @db.Text
+  uploadedBy    String
+  uploader      User           @relation(fields: [uploadedBy], references: [id], onDelete: Restrict)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
-  tests       Test[]
+  tests         Test[]
+
+  @@index([roomId])
+  @@index([status])
+  @@index([uploadedBy])
+  @@map("Document")
 }
 
 model Test {
   id            String     @id @default(uuid())
   title         String
   topic         String?
-  duration      Int?       // in minutes
+  /// Minutes.
+  duration      Int?
   questionCount Int        @default(0)
   difficulty    String?
   status        TestStatus @default(DRAFT)
   roomId        String?
-  room          Room?      @relation(fields: [roomId], references: [id])
+  room          Room?      @relation(fields: [roomId], references: [id], onDelete: SetNull)
   documentId    String?
-  document      Document?  @relation(fields: [documentId], references: [id])
+  document      Document?  @relation(fields: [documentId], references: [id], onDelete: SetNull)
   creatorId     String
-  creator       User       @relation(fields: [creatorId], references: [id])
+  creator       User       @relation(fields: [creatorId], references: [id], onDelete: Restrict)
   createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
   publishedAt   DateTime?
 
-  questions   Question[]
-  submissions Submission[]
+  questions     Question[]
+  submissions   Submission[]
+
+  @@index([roomId])
+  @@index([creatorId])
+  @@index([status])
+  @@map("Test")
 }
 
 model Question {
@@ -109,13 +198,19 @@ model Question {
   testId        String
   test          Test     @relation(fields: [testId], references: [id], onDelete: Cascade)
   questionText  String
-  options       Json     // Array of 4 strings: ["option0", "option1", "option2", "option3"]
-  correctAnswer Int      // 0-3 index into options array
-  difficulty    String?  // EASY, MEDIUM, HARD
+  /// Array of exactly 4 strings.
+  options       Json
+  /// 0-3 index into `options`.
+  correctAnswer Int
+  difficulty    String?
   points        Int      @default(1)
   createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   answers       Answer[]
+
+  @@index([testId])
+  @@map("Question")
 }
 
 model Submission {
@@ -128,24 +223,129 @@ model Submission {
   percentage     Float?
   correctAnswers Int?
   wrongAnswers   Int?
-  timeTaken      Int?      // in seconds
+  /// Seconds.
+  timeTaken      Int?
+  /// Client IP recorded at submission time (audit).
+  submittedIp    String?
   startedAt      DateTime  @default(now())
   submittedAt    DateTime?
 
   answers        Answer[]
 
   @@unique([testId, studentId])
+  @@index([studentId])
+  @@index([testId])
+  @@index([submittedAt])
+  @@map("Submission")
 }
 
 model Answer {
-  id              String     @id @default(uuid())
-  submissionId    String
-  submission      Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
-  questionId      String
-  question        Question   @relation(fields: [questionId], references: [id], onDelete: Cascade)
-  selectedAnswer  Int?       // 0-3 index
-  isCorrect       Boolean    @default(false)
-  createdAt       DateTime   @default(now())
+  id             String     @id @default(uuid())
+  submissionId   String
+  submission     Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  questionId     String
+  question       Question   @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  /// 0-3 index, NULL when skipped.
+  selectedAnswer Int?
+  isCorrect      Boolean    @default(false)
+  createdAt      DateTime   @default(now())
 
   @@unique([submissionId, questionId])
+  @@index([questionId])
+  @@map("Answer")
+}
+
+// ---------------------------------------------------------------------------
+// Security / identity infrastructure
+// ---------------------------------------------------------------------------
+
+/// A refresh-token session. Only the SHA-256 hash of the token is stored.
+model Session {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash String    @unique
+  /// Rotation family — all sessions in a family are revoked if a token is replayed.
+  familyId         String
+  ip               String?
+  userAgent        String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  revokedReason    String?
+  lastUsedAt       DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("Session")
+}
+
+/// Every sign-in attempt, successful or not. Append-only.
+model LoginAttempt {
+  id        String   @id @default(uuid())
+  email     String
+  ip        String?
+  userAgent String?
+  success   Boolean
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@index([email, createdAt])
+  @@index([ip, createdAt])
+  @@index([createdAt])
+  @@map("LoginAttempt")
+}
+
+/// Single-use password reset token (hash only).
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  ip        String?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("PasswordResetToken")
+}
+
+/// Single-use email verification token (hash only).
+model EmailVerificationToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("EmailVerificationToken")
+}
+
+/// Append-only audit trail of security-relevant actions.
+model AuditLog {
+  id         String   @id @default(uuid())
+  /// Null for anonymous/system events.
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorEmail String?
+  action     String
+  entity     String?
+  entityId   String?
+  ip         String?
+  userAgent  String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("AuditLog")
 }

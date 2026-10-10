@@ -89,7 +89,8 @@ async function main() {
 
   const teacher = await prisma.user.upsert({
     where: { email: 'teacher@demo.com' },
-    update: { fullname: 'Prof. Jordan', role: Role.TEACHER },
+    // Reset the known demo password so the credentials always work.
+    update: { fullname: 'Prof. Jordan', role: Role.TEACHER, password: passwordHash },
     create: {
       email: 'teacher@demo.com',
       fullname: 'Prof. Jordan',
@@ -104,7 +105,7 @@ async function main() {
   for (let i = 0; i < STUDENT_NAMES.length; i++) {
     const student = await prisma.user.upsert({
       where: { email: `student${i + 1}@demo.com` },
-      update: { fullname: STUDENT_NAMES[i], role: Role.STUDENT },
+      update: { fullname: STUDENT_NAMES[i], role: Role.STUDENT, password: passwordHash },
       create: {
         email: `student${i + 1}@demo.com`,
         fullname: STUDENT_NAMES[i],
@@ -143,7 +144,7 @@ async function main() {
   /* 5. Tests --------------------------------------------------------------- */
   const week1 = await prisma.test.upsert({
     where: { id: id('test', 'week1') },
-    update: {},
+    update: { questionCount: WEEK1_QUESTIONS.length },
     create: {
       id: id('test', 'week1'),
       title: 'Week 1: Intro to Databases',
@@ -178,7 +179,7 @@ async function main() {
   for (let round = 1; round <= 3; round++) {
     const quiz = await prisma.test.upsert({
       where: { id: id('test', `pop${round}`) },
-      update: {},
+      update: { questionCount: POP_QUIZ_QUESTIONS.length },
       create: {
         id: id('test', `pop${round}`),
         title: `Pop Quiz ${round}`,

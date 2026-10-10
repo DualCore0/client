@@ -39,7 +39,7 @@ const suffix = Date.now().toString().slice(-6);
 
 /* 1. Teacher account + room ------------------------------------------------ */
 const teacher = await req('POST', '/auth/register', {
-  body: { email: `demo.teacher.${suffix}@example.com`, password: 'password123', fullname: 'Prof. Jordan', role: 'TEACHER' },
+  body: { email: `demo.teacher.${suffix}@example.com`, password: 'Secur3!Passphrase', fullname: 'Prof. Jordan', role: 'TEACHER' },
 });
 log('teacher registers', teacher.status === 201, `status=${teacher.status}`);
 
@@ -131,7 +131,7 @@ if (testId) {
 
 /* 6. Student joins with the code and takes the test ----------------------- */
 const student = await req('POST', '/auth/register', {
-  body: { email: `demo.student.${suffix}@example.com`, password: 'password123', fullname: 'Alice Smith', role: 'STUDENT' },
+  body: { email: `demo.student.${suffix}@example.com`, password: 'Secur3!Passphrase', fullname: 'Alice Smith', role: 'STUDENT' },
 });
 log('student registers', student.status === 201, `status=${student.status}`);
 

@@ -34,9 +34,18 @@ export function createPrismaMock() {
     question: modelMock(),
     submission: modelMock(),
     answer: modelMock(),
+    // Security infrastructure
+    session: modelMock(),
+    loginAttempt: modelMock(),
+    passwordResetToken: modelMock(),
+    emailVerificationToken: modelMock(),
+    auditLog: modelMock(),
     $connect: vi.fn(),
     $disconnect: vi.fn(),
-    $transaction: vi.fn(),
+    // Runs the supplied operations in order and resolves them.
+    $transaction: vi.fn(async (operations: unknown) =>
+      Array.isArray(operations) ? Promise.all(operations) : (operations as () => unknown)(),
+    ),
   };
 }
 
