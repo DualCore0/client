@@ -5,31 +5,53 @@ multiple-choice questions grounded in that document, the teacher reviews and
 publishes, students take a timed assessment, and the server grades it and
 updates the room and weekly leaderboards.
 
-Built for a hackathon MVP: Next.js (frontend) + NestJS (backend) + Prisma +
-Neon Postgres + Qdrant + OpenRouter (LLM).
+Next.js (frontend) · NestJS (backend) · Prisma · Neon Postgres · Qdrant ·
+OpenRouter (LLM). The data layer and API are hardened for production; see
+[Security](#security) below.
 
 ---
 
-## Demo script (what the pitch walks through)
+## Quick start
 
-1. Teacher signs in.
-2. Creates the room `BCA 5th Semester - DBMS` (gets a 6-character code + QR).
-3. Uploads `DBMS Unit 1.pdf`.
-4. AI generates 10 MCQs from the document.
-5. Teacher reviews, edits and publishes.
-6. Student joins with the code (or QR / shared link).
-7. Student takes the timed test.
-8. The server grades it — the student sees `9/10, 90%`.
-9. The room leaderboard updates immediately.
-10. The weekly global leaderboard shows cross-room rankings.
+### 1. Database
 
-### Demo credentials (from `prisma/seed.ts`)
+Paste **`backend/prisma/classrank-neon-schema.sql`** into the Neon SQL console
+and run it. That creates the complete hardened schema — tables, constraints,
+row-level security, audit triggers, least-privilege roles — with **no data**.
 
-| Role | Email | Password |
-|---|---|---|
-| Teacher | `teacher@demo.com` | `password123` |
-| Student | `student1@demo.com` … `student5@demo.com` | `password123` |
-| Demo room | code `K7M4P2` | — |
+It is the only file you need for a fresh database. (Use
+`backend/prisma/security-hardening.sql` instead if you already have data and
+only want to add the protections.)
+
+### 2. Environment
+
+```bash
+cd backend
+cp .env.example .env      # then fill in the values
+```
+
+Required: `DATABASE_URL` and `JWT_SECRET` (≥ 32 characters). The API refuses to
+boot with a missing, short, low-entropy, or placeholder secret. Generate one:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+```
+
+### 3. Run
+
+```bash
+# terminal 1 — API on :3001
+cd backend
+npm install
+npm run start:dev
+
+# terminal 2 — web app on :3000
+npm install
+npm run dev
+```
+
+Open <http://localhost:3000> and sign up. There is no seeded data — every
+account is created through the app.
 
 ---
 
@@ -37,135 +59,204 @@ Neon Postgres + Qdrant + OpenRouter (LLM).
 
 ```
 app/                     Next.js App Router pages
-components/              shared UI (auth provider, toasts, nav, states)
-lib/api.ts               single typed API client
+components/              auth provider, toasts, nav, shared states
+lib/api.ts               typed API client + password policy mirror
 middleware.ts            edge guard for protected routes
 backend/
-  prisma/schema.prisma   data model
-  prisma/seed.ts         demo room, students, attempts
-  src/auth               register / login / JWT / role guards
-  src/rooms              create, join, code lookup, QR + share link
-  src/documents          PDF upload, text extraction, chunking, embeddings
-  src/ai                 RAG retrieval + LLM question generation
-  src/tests              manual/AI test CRUD, publish, per-test results
-  src/submissions        server-side timing and grading
-  src/leaderboard        room + weekly global leaderboards
-  src/users              profiles and aggregate stats
-  src/common             question validation / LLM helpers (shared)
-  scripts/               smoke tests and DB utilities
+  prisma/
+    schema.prisma                data model
+    classrank-neon-schema.sql    complete secure schema (Neon console)
+    security-hardening.sql       add protections to an existing database
+    wipe-data.sql                empty every table, keep the schema
+  src/
+    common/config/             env validation, rate-limit config
+    common/security/           audit trail, encryption, password policy, upload checks
+    common/filters/            sanitising exception filter
+    auth/                      register/login/refresh/reset, sessions, JWT strategy
+    rooms/ documents/ ai/ tests/ submissions/ leaderboard/ users/
+  scripts/                 verification suites and DB utilities
 ```
 
 ---
 
-## Setup
+## Security
 
-### 1. Environment
+### Database level
 
-`backend/.env`:
+| Control | Detail |
+|---|---|
+| **Least-privilege roles** | `classrank_app` (read/write) and `classrank_readonly` (reporting). `PUBLIC` loses all rights and cannot create objects. Run the API as `classrank_app`, not the owner, for these to bite. |
+| **Row-level security** | Enabled on all 13 tables with per-role policies. |
+| **Append-only audit trail** | `AuditLog` and `LoginAttempt` use `FORCE ROW LEVEL SECURITY` plus a `BEFORE UPDATE OR DELETE` trigger. Neither the app role nor the owner can rewrite history at the row level. |
+| **Audit triggers** | Every INSERT/UPDATE/DELETE on `User`, `Room`, `RoomMember`, `Document`, `Test`, `Question` and `Submission` is recorded. Secret columns (`password`, `twoFactorSecret`, `refreshTokenHash`, `tokenHash`, `extractedText`) are stripped before the row image is written. |
+| **CHECK constraints (26)** | Lower-case emails, email format, bcrypt-format hashes, 6-character upper-case room codes, 0–3 answer indexes, 0–100 percentages, 4-option questions, PDF-only documents, non-negative counters, `submittedAt >= startedAt`. Invalid rows are impossible even via raw SQL. |
+| **Column-level grants** | `classrank_readonly` can read `User` columns *except* `password`, `twoFactorSecret` and `tokenVersion`, and has no access at all to `Session`, `PasswordResetToken` or `EmailVerificationToken`. |
+| **`updatedAt` triggers** | Timestamps stay correct even for raw SQL writes. |
 
-```
-DATABASE_URL=postgresql://...        # Neon (or any Postgres)
-JWT_SECRET=change-me
-QDRANT_URL=https://...               # optional
-QDRANT_API_KEY=...
-OPENROUTER_API_KEY=...               # LLM provider key
-FRONTEND_URL=http://localhost:3000
-AI_MODEL=openai/gpt-4o-mini          # optional override
-```
+### Authentication
 
-The frontend needs no variables for local development — `next.config.mjs`
-proxies `/api-backend/*` to `http://localhost:3001`.
+- **bcrypt** with a cost of 12 (configurable 10–15). Hashes are never returned
+  by any endpoint, and the DTO/`select` layers make accidental exposure hard.
+- **Account lockout** — `MAX_LOGIN_ATTEMPTS` (default 5) failures locks the
+  account for `LOCKOUT_MINUTES` (default 15). The lock is checked *before*
+  password verification.
+- **User-enumeration resistance** — unknown account and wrong password return
+  the same message, and a dummy bcrypt comparison runs for unknown accounts so
+  response timing does not leak existence either.
+- **Short-lived access tokens** (15 minutes) carrying a `tokenVersion`.
+- **Refresh tokens** are random 48-byte values stored **only as SHA-256
+  hashes**, delivered in an `HttpOnly`, `SameSite=Lax`, `Secure`-in-production
+  cookie. They are never in a JSON response.
+- **Rotation with replay detection** — every refresh revokes the previous token.
+  Presenting an already-revoked token means it leaked, so the entire rotation
+  family is revoked and the event is audited.
+- **Real revocation** — `JwtStrategy` re-checks the account on every request.
+  Bumping `tokenVersion` (password change, password reset, sign-out-everywhere)
+  invalidates every outstanding access token immediately.
+- **Password policy** — ≥ 10 characters with upper case, lower case, a digit
+  and a symbol; rejects common passwords (including l33t spellings), keyboard
+  and alphabet runs, four-character repeats, and anything derived from the
+  user's own name or email. Enforced on the server (DTO + service) and mirrored
+  in the UI for immediate feedback.
+- **Password reset** — single-use, hashed, 30-minute tokens; the response is
+  identical whether or not the address exists; a successful reset revokes every
+  session.
+- **Email verification** — single-use hashed tokens; opt-in enforcement via
+  `REQUIRE_EMAIL_VERIFICATION=true`.
+- **Public registration can never mint an `ADMIN`.**
 
-Without `OPENROUTER_API_KEY` the backend still works end to end: it falls back
-to deterministic offline questions instead of calling the LLM.
+### API level
 
-### 2. Install and prepare the database
+- **helmet** with a locked-down CSP, HSTS (production), `X-Frame-Options: DENY`,
+  `nosniff`, no referrer, and `X-Powered-By` removed.
+- **Strict CORS** — explicit allow-list, credentials enabled, wildcards
+  rejected outright, and blocked origins logged.
+- **Global validation pipe** with `whitelist`, `forbidNonWhitelisted` and
+  `forbidUnknownValues`: unknown fields are rejected, not silently ignored, so
+  mass-assignment attempts fail loudly.
+- **Sanitising exception filter** — 5xx responses never leak stack traces or
+  driver/SQL internals, and every response carries a correlation id matching the
+  server log line.
+- **Rate limiting** — per-route budgets (register 5/min, login 10/min, password
+  endpoints 5/min, LLM 5/min) on top of a global default. All tunable via
+  `THROTTLE_*` environment variables.
+- **Uploads validated by content** — PDF magic bytes (`%PDF-`), `%%EOF` trailer,
+  declared-size match, and rejection of embedded active content
+  (`/JavaScript`, `/Launch`, `/OpenAction`, `/EmbeddedFile`, …). Filenames are
+  sanitised and a SHA-256 integrity hash is stored.
+- **Body size limits** (256 KB JSON) and **proxy-aware client IPs** for accurate
+  auditing and throttling.
+- **Boot-time environment validation** — no weak or placeholder secrets, TLS
+  required on `DATABASE_URL` in production, bounded lockout/hashing settings.
 
-```bash
-cd backend
-npm install
-npx prisma generate
-npx prisma db push       # or: npx prisma migrate dev
-npx tsx prisma/seed.ts   # demo room, students, seeded attempts
-```
+### Resilience
 
-### 3. Run
+Neon suspends idle databases, so the Prisma client retries connection-level
+failures (`P1001`, `P1002`, `P1008`, `P1017`, `P2024`, …) with exponential
+backoff both at boot and per statement. A cold start surfaces as latency rather
+than a 500. Only connection errors are retried — a failed connection means the
+statement never ran, so replaying a write cannot double-apply it.
 
-```bash
-# terminal 1 - API on :3001
-cd backend
-npm run start:dev
+### Deliberate trade-offs
 
-# terminal 2 - web app on :3000
-npm install
-npm run dev
-```
-
-Open <http://localhost:3000> and sign in with a demo account above.
+- Access tokens live in `localStorage` for the SPA, so an XSS foothold could
+  read one. The blast radius is bounded to 15 minutes by short expiry, the
+  refresh token is `HttpOnly` and unreadable from JavaScript, and CSP plus React
+  escaping are the primary XSS defences. Moving to cookie-only access tokens is
+  the next step if you want to eliminate this entirely.
+- The audit trail is append-only for row operations. Purging for retention or
+  GDPR requires deliberately disabling the trigger (documented in the SQL file)
+  or `TRUNCATE`, which bypasses row triggers.
+- The weekly global score is not difficulty-normalised across different tests.
 
 ---
 
 ## Verification
 
-Everything below is runnable and was used to validate the project.
+Every claim above is covered by a runnable check.
 
 ```bash
 cd backend
 
-npm test                           # 119 unit tests
-node scripts/e2e-smoke.mjs         # 53 API + authorisation checks (API must be up)
-node scripts/demo-path.mjs         # 21 checks through the full demo path, incl. a real PDF
-node scripts/middleware-check.mjs  # route protection (web app must be up)
+# 188 unit tests — auth, lockout, password policy, env validation, grading
+npm test
+
+# 20 database-security checks — roles, RLS, append-only, CHECK constraints
+node scripts/security-check.mjs
+
+# Full build + type check
+npm run build
+
+# --- the following need the API running on :3001 ---
+
+# 50 live security checks — headers, lockout, rotation, replay detection,
+# token revocation, payload whitelisting, upload content checks, error hygiene
+node scripts/security-live.mjs
+
+# 53 API/authorisation checks
+node scripts/e2e-smoke.mjs
+
+# 21 checks through the full demo path, including a real PDF -> AI -> publish
+node scripts/demo-path.mjs
+
+# 4 rate-limit checks — run against default limits (no THROTTLE_* overrides)
+node scripts/rate-limit-check.mjs
+```
+
+`security-live.mjs` deliberately exercises many auth endpoints, so run the API
+with widened limits for that suite and with defaults for the rate-limit suite:
+
+```bash
+# functional suites
+THROTTLE_LOGIN_LIMIT=500 THROTTLE_REGISTER_LIMIT=500 \
+THROTTLE_SENSITIVE_LIMIT=500 node dist/main.js
+
+# rate-limit suite
+node dist/main.js
 ```
 
 Supporting utilities:
 
 ```bash
-node scripts/make-pdf.mjs                       # regenerate fixtures/dbms-unit-1.pdf
-node scripts/dbcheck.mjs                        # list users/rooms/tests/documents
-node scripts/cleanup-test-data.mjs --dry-run    # review smoke-test leftovers
-node scripts/cleanup-test-data.mjs              # remove them
+node scripts/make-pdf.mjs                     # regenerate fixtures/dbms-unit-1.pdf
+node scripts/build-neon-schema.mjs            # regenerate the Neon SQL file
+node scripts/dbcheck.mjs                      # inspect users/rooms/tests
+node scripts/cleanup-test-data.mjs --dry-run  # review smoke-test leftovers
 ```
 
-The smoke tests create their own accounts (`*@example.com`) and print the room
-code they used, so they are safe to run repeatedly.
+---
+
+## Production checklist
+
+1. Run `classrank-neon-schema.sql` (or `security-hardening.sql`) on the database.
+2. Set strong, unique values for `JWT_SECRET`, `APP_ENCRYPTION_KEY` and the
+   `classrank_app` password. Store them in a secret manager, never in git.
+3. **Point `DATABASE_URL` at `classrank_app`**, not the owner role — otherwise
+   RLS and the audit guarantees do not apply to the application.
+4. Set `NODE_ENV=production` and `CORS_ORIGINS` to your real origins. The API
+   will refuse to start if either is wrong.
+5. Terminate TLS in front of the API so `Secure` cookies are sent.
+6. Decide on `REQUIRE_EMAIL_VERIFICATION` and wire a mail provider — the reset
+   and verification tokens are only logged, not emailed, until you do.
+7. Back up the database. `wipe-data.sql` and the schema script are destructive.
 
 ---
 
-## Security behaviours implemented
-
-- Passwords hashed with bcrypt; never returned by any endpoint.
-- JWT bearer auth with role guards on every protected route.
-- All request bodies validated with `class-validator` DTOs.
-- Uploads restricted to PDF and capped at 10 MB.
-- Rate limiting on login/registration and AI generation.
-- Room membership verified before any test access.
-- Grading and the attempt timer are server-side; the client cannot influence
-  either. A late submission is still graded rather than silently lost.
-- Duplicate submissions are rejected; an in-progress attempt is resumed instead
-  of restarted.
-- Correct answers are stripped from every student payload until the attempt is
-  submitted.
-- Public room preview exposes only non-sensitive metadata.
-- Public profiles expose name, aggregate stats and results - never emails.
-- `.env` files are git-ignored; `.env.example` documents the required keys.
-
----
-
-## Known limitations (be honest in the pitch)
+## Known limitations
 
 - MCQs test recall, not deep understanding.
 - No proctoring, so scores depend on student honesty.
-- The weekly global score is not difficulty-normalised across different tests.
-- Scanned PDFs need OCR, which is out of scope; the upload is marked `FAILED`
-  with a clear message instead.
-- Embeddings are generated with placeholder vectors when no embedding provider
-  is configured, so Qdrant acts as a chunk store; retrieval also falls back to
-  the text extracted at upload time.
+- Scanned PDFs need OCR; such uploads are marked `FAILED` with a clear message.
+- Embeddings use placeholder vectors when no embedding provider is configured,
+  so Qdrant acts as a chunk store and retrieval falls back to the text extracted
+  at upload time.
 - AI generation retries up to three times inside the request; there is no
   background job queue.
+- No mail provider is wired, so password-reset and verification tokens are
+  returned in development and must be logged in production.
 
 ## Post-MVP ideas
 
 Weak-topic practice, more question types, teacher analytics, OCR,
-difficulty-normalised global scoring, institution dashboards.
+difficulty-normalised global scoring, institution dashboards, TOTP two-factor
+(the schema and encryption helper are already in place).

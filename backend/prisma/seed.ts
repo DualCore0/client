@@ -2,15 +2,25 @@ import { PrismaClient, Role, TestStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 /**
- * Demo seed. Idempotent: every record uses a deterministic id and is upserted,
- * so running it repeatedly (or after a partial failure) never duplicates the
- * demo room, tests or attempts.
+ * OPTIONAL demo seed.
+ *
+ * The database ships EMPTY — real accounts are created through /signup. Run this
+ * only when you want a populated environment for a demo or a quick tour.
+ *
+ * Idempotent: every record uses a deterministic id and is upserted, so running
+ * it repeatedly (or after a partial failure) never duplicates the demo room,
+ * tests or attempts.
  *
  *   npx tsx prisma/seed.ts            # create/refresh the demo data
  *   npx tsx prisma/seed.ts --reset    # delete the demo tests first, then reseed
+ *
+ * To get back to an empty database, run prisma/wipe-data.sql.
  */
 const prisma = new PrismaClient();
 const RESET = process.argv.includes('--reset');
+
+/** Demo password — meets the application password policy. */
+const DEMO_PASSWORD = 'Demo!ClassRank2026';
 
 const ROOM_CODE = 'K7M4P2';
 const STUDENT_NAMES = ['Alice Smith', 'Bob Jones', 'Charlie Brown', 'Diana Prince', 'Eve Adams'];
@@ -85,7 +95,8 @@ async function main() {
   }
 
   /* 1. Teacher ------------------------------------------------------------- */
-  const passwordHash = await bcrypt.hash('password123', 10);
+  // Cost 12 matches the application default.
+  const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 12);
 
   const teacher = await prisma.user.upsert({
     where: { email: 'teacher@demo.com' },
@@ -273,9 +284,10 @@ async function main() {
   console.log(`Attempts ready: ${attemptCount}`);
 
   console.log('\nSeeding finished. Demo environment is ready.');
-  console.log(`  Teacher:  teacher@demo.com / password123`);
-  console.log(`  Students: student1@demo.com … student5@demo.com / password123`);
+  console.log(`  Teacher:  teacher@demo.com / ${DEMO_PASSWORD}`);
+  console.log(`  Students: student1@demo.com … student5@demo.com / ${DEMO_PASSWORD}`);
   console.log(`  Room:     ${room.name} (code ${room.code})`);
+  console.log('\nRun prisma/wipe-data.sql to return to an empty database.');
 }
 
 main()
