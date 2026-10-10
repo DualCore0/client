@@ -1,0 +1,102 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 1775 >>
+stream
+BT
+/F1 12 Tf
+16 TL
+56 760 Td
+(Database Management Systems - Unit 1) Tj
+T*
+() Tj
+T*
+(A database is an organised collection of structured data that can be) Tj
+T*
+(accessed, managed and updated electronically.) Tj
+T*
+() Tj
+T*
+(SQL stands for Structured Query Language. It is the standard language) Tj
+T*
+(used to create, read, update and delete data in a relational database.) Tj
+T*
+() Tj
+T*
+(A primary key uniquely identifies each row in a table. It cannot be null) Tj
+T*
+(and must be unique across all rows.) Tj
+T*
+() Tj
+T*
+(A foreign key is a column that references the primary key of another) Tj
+T*
+(table, creating a link between the two tables. This is how relationships) Tj
+T*
+(are represented in a relational model.) Tj
+T*
+() Tj
+T*
+(Normalisation is the process of organising data to reduce redundancy and) Tj
+T*
+(improve data integrity. First Normal Form removes repeating groups.) Tj
+T*
+(Second Normal Form removes partial dependencies. Third Normal Form) Tj
+T*
+(removes transitive dependencies.) Tj
+T*
+() Tj
+T*
+(A transaction is a sequence of operations performed as a single logical) Tj
+T*
+(unit of work. Transactions follow the ACID properties: Atomicity,) Tj
+T*
+(Consistency, Isolation and Durability.) Tj
+T*
+() Tj
+T*
+(An index is a data structure that improves the speed of data retrieval) Tj
+T*
+(operations at the cost of additional writes and storage space.) Tj
+T*
+() Tj
+T*
+(A JOIN clause combines rows from two or more tables based on a related) Tj
+T*
+(column. INNER JOIN returns only matching rows, while LEFT JOIN returns) Tj
+T*
+(all rows from the left table plus matching rows from the right.) Tj
+T*
+() Tj
+T*
+(NoSQL databases such as MongoDB store documents rather than tables and) Tj
+T*
+(are designed for flexible schemas and horizontal scaling.) Tj
+T*
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000002067 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+2137
+%%EOF

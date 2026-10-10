@@ -5,6 +5,17 @@ import { RolesGuard, Roles } from '../auth/roles.guard.js';
 import { Role } from '@prisma/client';
 import { CreateRoomDto, JoinRoomDto } from './dto/rooms.dto.js';
 
+/** Unauthenticated endpoints. Only non-sensitive room metadata is exposed. */
+@Controller('public')
+export class PublicRoomsController {
+  constructor(private readonly roomsService: RoomsService) {}
+
+  @Get('rooms/:code')
+  getRoomPreview(@Param('code') code: string) {
+    return this.roomsService.getRoomPreview(code);
+  }
+}
+
 @Controller('rooms')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class RoomsController {
@@ -25,6 +36,12 @@ export class RoomsController {
   @Roles(Role.STUDENT)
   joinRoom(@Body() dto: JoinRoomDto, @Request() req: any) {
     return this.roomsService.joinRoom(dto.code, req.user.userId);
+  }
+
+  /** Look a room up by its 6-character code (used by /join/[code]). */
+  @Get('code/:code')
+  getRoomByCode(@Param('code') code: string) {
+    return this.roomsService.getRoomPreview(code);
   }
 
   @Get(':id')

@@ -3,6 +3,11 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma.service.js';
 import { Test, TestStatus } from '@prisma/client';
 import { QdrantClient } from '@qdrant/js-client-rest';
+import {
+  fallbackQuestions,
+  generateQuestionsWithLlm,
+  normalizeQuestions,
+} from '../common/question-generator.js';
 
 @Injectable()
 export class TestsService {
@@ -19,93 +24,76 @@ export class TestsService {
   }
 
   async generateTest(topic: string, userId: string, roomId?: string, questionCount: number = 5): Promise<Test> {
-    try {
-      let context = '';
-      try {
-        const queryVector = new Array(768).fill(0.1); // Dummy vector for now without real embeddings
-        const searchResult = await (this.qdrantClient as any).search('knowledge_base', {
-          vector: queryVector,
-          limit: 3,
-        });
-        context = searchResult.map((r: any) => r.payload?.text).join('\n');
-      } catch (e) {
-        console.warn('Qdrant search failed, proceeding without context');
-      }
+    if (!topic || !topic.trim()) throw new BadRequestException('A topic is required');
 
-      const prompt = `Generate a ${questionCount}-question multiple choice test on the topic of "${topic}". 
-Context: ${context}
-Output STRICTLY as JSON in this format and nothing else: { "questions": [{ "question": "...", "options": ["A", "B", "C", "D"], "correctAnswer": 0, "difficulty": "MEDIUM" }] }`;
-      
-      const openRouterApiKey = this.configService.get<string>('OPENROUTER_API_KEY');
-      if (!openRouterApiKey) {
-        throw new Error("OPENROUTER_API_KEY is not set.");
-      }
-
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${openRouterApiKey}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": "http://localhost:3000", 
-          "X-Title": "Hackathon App", 
-        },
-        body: JSON.stringify({
-          model: "nvidia/llama-3.1-nemotron-70b-instruct",
-          messages: [
-            { role: "user", content: prompt }
-          ]
-        })
-      });
-
-      if (!response.ok) {
-        throw new InternalServerErrorException('Failed to generate test questions');
-      }
-
-      const data = await response.json();
-      const textResponse = data.choices[0]?.message?.content || "{}";
-
-      let parsedData: any = { questions: [] };
-      try {
-        const match = textResponse.match(/```json\n([\s\S]*?)\n```/);
-        const jsonString = match ? match[1] : textResponse;
-        parsedData = JSON.parse(jsonString);
-        if (!parsedData.questions && Array.isArray(parsedData)) {
-           parsedData = { questions: parsedData };
-        }
-      } catch (parseError) {
-        console.error('Failed to parse LLM response', parseError, textResponse);
-        throw new InternalServerErrorException('Failed to parse LLM response');
-      }
-
-      const questions = parsedData.questions;
-      if (!Array.isArray(questions) || questions.length === 0) {
-         throw new InternalServerErrorException('LLM returned invalid format');
-      }
-
-      return await this.prisma.test.create({
-        data: {
-          title: `Test on ${topic}`,
-          topic,
-          creatorId: userId,
-          roomId: roomId || null,
-          questionCount: questions.length,
-          status: TestStatus.DRAFT,
-          questions: {
-            create: questions.map((q: any) => ({
-              questionText: q.question || q.text,
-              options: q.options.slice(0, 4),
-              correctAnswer: typeof q.correctAnswer === 'number' ? q.correctAnswer : 0,
-              difficulty: q.difficulty || 'MEDIUM',
-            }))
-          }
-        },
-        include: { questions: { select: { id: true, questionText: true, options: true, difficulty: true, points: true } } }
-      });
-
-    } catch (error) {
-      console.error(error);
-      throw new InternalServerErrorException('Error generating test');
+    // Room-scoped generation must be performed by the room's teacher.
+    if (roomId) {
+      const room = await this.prisma.room.findUnique({ where: { id: roomId } });
+      if (!room) throw new NotFoundException('Room not found');
+      if (room.teacherId !== userId) throw new ForbiddenException('Not the teacher of this room');
     }
+
+    let context = '';
+    try {
+      const queryVector = new Array(768).fill(0.1); // Dummy vector for now without real embeddings
+      const searchResult: any = await (this.qdrantClient as any).search('knowledge_base', {
+        vector: queryVector,
+        limit: 3,
+      });
+      context = (searchResult?.points || searchResult || [])
+        .map((r: any) => r?.payload?.text)
+        .filter(Boolean)
+        .join('\n');
+    } catch {
+      console.warn('Qdrant search failed, proceeding without context');
+    }
+
+    const prompt = `Generate exactly ${questionCount} multiple-choice questions on the topic of "${topic}".
+${context ? `Base the questions on this study material:\n"""\n${context.slice(0, 16000)}\n"""\n` : ''}
+Rules:
+- Each question must have exactly 4 distinct options and exactly one correct answer.
+- "correctAnswer" must be the 0-based index (0-3) of the correct option.
+- Do not repeat questions or options.
+
+Respond with raw JSON only: {"questions":[{"question":"...","options":["...","...","...","..."],"correctAnswer":0,"difficulty":"MEDIUM"}]}`;
+
+    const apiKey = this.configService.get<string>('OPENROUTER_API_KEY');
+    let questions;
+    try {
+      questions = apiKey
+        ? await generateQuestionsWithLlm({ apiKey, prompt, expected: questionCount })
+        : fallbackQuestions(topic, questionCount);
+    } catch (error: any) {
+      throw new InternalServerErrorException(
+        `Could not generate valid questions (${error?.message || error})`,
+      );
+    }
+
+    if (questions.length === 0) {
+      throw new InternalServerErrorException('AI did not return any valid questions');
+    }
+
+    return this.prisma.test.create({
+      data: {
+        title: `Test on ${topic}`,
+        topic,
+        creatorId: userId,
+        roomId: roomId || null,
+        // A duration is what drives the server-side timer, so always set one.
+        duration: 15,
+        questionCount: questions.length,
+        status: TestStatus.DRAFT,
+        questions: {
+          create: questions.map((q) => ({
+            questionText: q.questionText,
+            options: q.options,
+            correctAnswer: q.correctAnswer,
+            difficulty: q.difficulty,
+          }))
+        }
+      },
+      include: { questions: { select: { id: true, questionText: true, options: true, difficulty: true, points: true } } }
+    });
   }
 
   async getTestsByUser(userId: string, role: string): Promise<Test[]> {
@@ -113,17 +101,24 @@ Output STRICTLY as JSON in this format and nothing else: { "questions": [{ "ques
       return this.prisma.test.findMany({
         where: { creatorId: userId },
         orderBy: { createdAt: 'desc' },
-        include: { _count: { select: { submissions: true } }, room: { select: { name: true } } }
+        include: { _count: { select: { submissions: true, questions: true } }, room: { select: { id: true, name: true, code: true } } }
       });
     } else {
-      // Students see published tests in rooms they joined
+      // Students see published tests in rooms they joined, plus their own attempt status
       return this.prisma.test.findMany({
-        where: { 
+        where: {
           status: TestStatus.PUBLISHED,
           room: { members: { some: { studentId: userId } } }
         },
         orderBy: { publishedAt: 'desc' },
-        include: { room: { select: { name: true } }, _count: { select: { questions: true } } }
+        include: {
+          room: { select: { id: true, name: true, code: true } },
+          _count: { select: { questions: true } },
+          submissions: {
+            where: { studentId: userId },
+            select: { id: true, score: true, percentage: true, submittedAt: true },
+          },
+        }
       });
     }
   }
@@ -137,6 +132,13 @@ Output STRICTLY as JSON in this format and nothing else: { "questions": [{ "ques
       return this.prisma.test.findMany({
         where: { roomId, status: TestStatus.PUBLISHED },
         orderBy: { publishedAt: 'desc' },
+        include: {
+          _count: { select: { questions: true } },
+          submissions: {
+            where: { studentId: userId },
+            select: { id: true, score: true, percentage: true, submittedAt: true },
+          },
+        },
       });
     } else {
       const room = await this.prisma.room.findUnique({ where: { id: roomId } });
@@ -144,6 +146,10 @@ Output STRICTLY as JSON in this format and nothing else: { "questions": [{ "ques
       return this.prisma.test.findMany({
         where: { roomId },
         orderBy: { createdAt: 'desc' },
+        include: {
+          _count: { select: { questions: true, submissions: true } },
+          submissions: { select: { percentage: true } },
+        },
       });
     }
   }
@@ -178,15 +184,83 @@ Output STRICTLY as JSON in this format and nothing else: { "questions": [{ "ques
   }
 
   async publishTest(id: string, userId: string) {
-    const test = await this.prisma.test.findUnique({ where: { id } });
+    const test = await this.prisma.test.findUnique({
+      where: { id },
+      include: { _count: { select: { questions: true } } },
+    });
     if (!test) throw new NotFoundException('Test not found');
     if (test.creatorId !== userId) throw new ForbiddenException('Not your test');
     if (test.status === TestStatus.PUBLISHED) throw new BadRequestException('Already published');
+    if (test._count.questions === 0) {
+      throw new BadRequestException('Add at least one question before publishing');
+    }
 
     return this.prisma.test.update({
       where: { id },
-      data: { status: TestStatus.PUBLISHED, publishedAt: new Date() }
+      data: { status: TestStatus.PUBLISHED, publishedAt: new Date(), questionCount: test._count.questions },
     });
+  }
+
+  /** Teacher-side results for one test: attempts, average/high/low, student table. */
+  async getTestResults(id: string, userId: string) {
+    const test = await this.prisma.test.findUnique({
+      where: { id },
+      include: {
+        room: { select: { id: true, name: true, code: true } },
+        _count: { select: { questions: true } },
+        submissions: {
+          where: { submittedAt: { not: null } },
+          include: { student: { select: { id: true, fullname: true, email: true } } },
+          orderBy: { percentage: 'desc' },
+        },
+      },
+    });
+    if (!test) throw new NotFoundException('Test not found');
+    if (test.creatorId !== userId) throw new ForbiddenException('Not your test');
+
+    const percentages = test.submissions
+      .map((s) => s.percentage)
+      .filter((p): p is number => typeof p === 'number');
+
+    const attempts = test.submissions.map((s, index) => ({
+      rank: index + 1,
+      submissionId: s.id,
+      studentId: s.student.id,
+      name: s.student.fullname || s.student.email.split('@')[0],
+      email: s.student.email,
+      score: s.score,
+      percentage: s.percentage,
+      correctAnswers: s.correctAnswers,
+      wrongAnswers: s.wrongAnswers,
+      timeTaken: s.timeTaken,
+      submittedAt: s.submittedAt,
+    }));
+
+    return {
+      test: {
+        id: test.id,
+        title: test.title,
+        topic: test.topic,
+        status: test.status,
+        duration: test.duration,
+        difficulty: test.difficulty,
+        questionCount: test._count.questions,
+        room: test.room,
+        publishedAt: test.publishedAt,
+      },
+      summary: {
+        attemptCount: attempts.length,
+        averagePercentage: percentages.length
+          ? Number((percentages.reduce((a, b) => a + b, 0) / percentages.length).toFixed(2))
+          : null,
+        highPercentage: percentages.length ? Math.max(...percentages) : null,
+        lowPercentage: percentages.length ? Math.min(...percentages) : null,
+        passRate: percentages.length
+          ? Number(((percentages.filter((p) => p >= 40).length / percentages.length) * 100).toFixed(2))
+          : null,
+      },
+      attempts,
+    };
   }
 
   async editQuestion(testId: string, questionId: string, data: any, userId: string) {

@@ -1,0 +1,51 @@
+﻿
+> hackthon@0.1.0 build
+> next build
+
+  ▲ Next.js 14.2.35
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully
+   Skipping validation of types
+   Skipping linting
+   Collecting page data ...
+   Generating static pages (0/15) ...
+   Generating static pages (3/15) 
+   Generating static pages (7/15) 
+   Generating static pages (11/15) 
+ ✓ Generating static pages (15/15)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                              Size     First Load JS
+┌ ○ /                                    175 B          96.2 kB
+├ ○ /_not-found                          873 B          88.2 kB
+├ ○ /dashboard                           3.6 kB          104 kB
+├ ○ /join                                140 B           104 kB
+├ ƒ /join/[code]                         140 B           104 kB
+├ ○ /leaderboard                         3.26 kB         103 kB
+├ ○ /login                               6.15 kB         102 kB
+├ ○ /profile                             2.6 kB          103 kB
+├ ƒ /profile/[id]                        2.52 kB         103 kB
+├ ○ /rooms                               3.53 kB         104 kB
+├ ƒ /rooms/[id]                          4.7 kB          105 kB
+├ ƒ /rooms/[id]/leaderboard              2.66 kB         103 kB
+├ ○ /rooms/create                        4.99 kB        92.3 kB
+├ ○ /signup                              7.18 kB         103 kB
+├ ○ /tests                               3.18 kB         103 kB
+├ ƒ /tests/[id]                          3.79 kB        95.1 kB
+├ ƒ /tests/[id]/details                  2.58 kB         103 kB
+├ ƒ /tests/[id]/result                   2.34 kB         102 kB
+├ ƒ /tests/[id]/results                  3.69 kB         104 kB
+└ ○ /tests/create                        6.12 kB         106 kB
++ First Load JS shared by all            87.3 kB
+  ├ chunks/117-b93b2d5c59297f67.js       31.7 kB
+  ├ chunks/fd9d1056-dcba7f094ce3d609.js  53.6 kB
+  └ other shared chunks (total)          1.95 kB
+
+
+ƒ Middleware                             26.7 kB
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

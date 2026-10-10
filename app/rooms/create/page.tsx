@@ -1,203 +1,159 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { createRoom } from '@/lib/api';
+import { useRequireAuth } from '@/components/AuthProvider';
+import { useToast } from '@/components/ToastProvider';
 
-export default function CreateRoom() {
+export default function CreateRoomPage() {
   const router = useRouter();
-  const [roomName, setRoomName] = useState("BCA 5th Semester - DBMS");
-  const [subject, setSubject] = useState("Database Management System");
-  const [desc, setDesc] = useState("Weekly tests and midterm revision for BCA batch 2024-25");
-  
-  const [instantLeaderboard, setInstantLeaderboard] = useState(true);
-  const [cameraProctoring, setCameraProctoring] = useState(true);
-  
-  const [loading, setLoading] = useState(false);
-  const [created, setCreated] = useState(false);
+  const toast = useToast();
+  const { ready } = useRequireAuth('TEACHER');
 
-  const handleCreate = (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    
-    // Fake API Create
-    setTimeout(() => {
-      setLoading(false);
-      setCreated(true);
-      
-      // Auto redirect to new room dashboard
-      setTimeout(() => {
-        router.push("/rooms/K7M4P2");
-      }, 1200);
-    }, 1500);
+  const [name, setName] = useState('');
+  const [subject, setSubject] = useState('');
+  const [description, setDescription] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [created, setCreated] = useState<{ code: string; name: string } | null>(null);
+
+  const handleCreate = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!name.trim()) {
+      toast.error('Give the room a name.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const room = await createRoom({
+        name: name.trim(),
+        subject: subject.trim() || undefined,
+        description: description.trim() || undefined,
+      });
+      setCreated({ code: room.code, name: room.name });
+      toast.success(`Room created with code ${room.code}.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not create the room.');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  return (
-    <div className="flex-1 w-full bg-surface-container-low min-h-screen relative flex items-center justify-center p-4">
-      
-      {/* Active Focus Bottom Sheet / Modal Canvas */}
-      <div className="w-full max-w-lg bg-surface-container-lowest rounded-xl shadow-xl flex flex-col max-h-[90vh] overflow-hidden relative">
-        {/* Sheet Header */}
-        <div className="px-margin-mobile pt-space-md pb-space-xs flex items-start justify-between border-b border-surface-container-high/30">
-          <div className="pr-space-xs">
-            <div className="flex items-center gap-space-2xs mb-space-2xs">
-              <span className="px-space-xs py-0.5 rounded bg-primary-fixed text-on-primary-fixed font-label-mono-sm text-label-mono-sm uppercase tracking-wide">
-                Teacher Console
-              </span>
-            </div>
-            <h2 className="font-headline-lg-mobile text-headline-lg-mobile text-on-surface">Create a new Room</h2>
-            <p className="font-body-sm text-body-sm text-secondary mt-0.5">
-              Set up a classroom cohort to generate AI tests and track live leaderboards.
+  if (!ready) return null;
+
+  if (created) {
+    return (
+      <div className="min-h-screen bg-surface flex items-center justify-center p-4">
+        <div className="w-full max-w-md rounded-xl bg-surface-container-lowest border border-surface-container p-6 flex flex-col gap-4 text-center">
+          <span className="material-symbols-outlined text-[40px] text-tertiary mx-auto">check_circle</span>
+          <div>
+            <h1 className="font-headline-md text-headline-md text-on-surface">{created.name} is ready</h1>
+            <p className="font-body-sm text-body-sm text-on-surface-variant mt-1">
+              Share this code, QR or link with your students.
             </p>
           </div>
-          <button 
-            onClick={() => router.back()}
-            className="w-9 h-9 rounded-full bg-surface-container flex items-center justify-center text-on-surface-variant hover:text-on-surface transition-colors"
+          <div className="rounded-lg bg-surface-container-low py-4">
+            <span className="font-stat-mono-lg text-[28px] tracking-[0.35em] text-primary">{created.code}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => router.push(`/rooms/${created.code}`)}
+            className="h-11 rounded-lg bg-primary text-on-primary font-headline-sm text-headline-sm"
           >
-            <span className="material-symbols-outlined text-[20px]">close</span>
+            Open room dashboard
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setCreated(null);
+              setName('');
+              setSubject('');
+              setDescription('');
+            }}
+            className="h-11 rounded-lg bg-surface-container-low text-on-surface font-headline-sm text-[14px]"
+          >
+            Create another room
           </button>
         </div>
+      </div>
+    );
+  }
 
-        {/* Scrollable Form Container */}
-        <form onSubmit={handleCreate} className="flex-1 overflow-y-auto px-margin-mobile py-space-md space-y-space-md">
-          {/* Field 1: Room Name */}
-          <div className="space-y-space-2xs">
-            <label className="block font-label-mono-sm text-label-mono-sm uppercase text-secondary font-medium tracking-wide" htmlFor="roomNameInput">
-              Room Name <span className="text-error">*</span>
+  return (
+    <div className="min-h-screen bg-surface flex items-center justify-center p-4">
+      <div className="w-full max-w-lg rounded-xl bg-surface-container-lowest border border-surface-container overflow-hidden">
+        <div className="px-5 pt-5 pb-3 border-b border-surface-container-high">
+          <span className="inline-block px-2 py-0.5 rounded bg-primary-fixed text-on-primary-fixed font-label-mono-sm text-label-mono-sm uppercase">
+            Teacher console
+          </span>
+          <h1 className="font-headline-md text-headline-md text-on-surface mt-2">Create a new room</h1>
+          <p className="font-body-sm text-body-sm text-secondary mt-0.5">
+            A unique 6-character code and QR will be generated automatically.
+          </p>
+        </div>
+
+        <form onSubmit={handleCreate} className="p-5 flex flex-col gap-4">
+          <div>
+            <label htmlFor="roomName" className="block font-label-mono-sm text-label-mono-sm uppercase text-secondary mb-1.5">
+              Room name <span className="text-error">*</span>
             </label>
-            <div className="relative flex items-center">
-              <span className="material-symbols-outlined absolute left-3 text-secondary text-[20px] pointer-events-none">school</span>
-              <input 
-                id="roomNameInput" 
-                type="text" 
-                required 
-                value={roomName}
-                onChange={e => setRoomName(e.target.value)}
-                className="w-full pl-10 pr-3 h-11 bg-surface-container-low rounded-lg font-body-md text-body-md text-on-surface placeholder:text-outline focus:bg-surface-container-lowest focus:outline-none focus:ring-2 focus:ring-primary transition-all" 
-                placeholder="e.g. BCA 5th Semester - DBMS" 
-              />
-            </div>
+            <input
+              id="roomName"
+              type="text"
+              required
+              maxLength={100}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. BCA 5th Semester - DBMS"
+              className="w-full h-11 px-3 rounded-lg bg-surface-container-low text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
           </div>
 
-          {/* Field 2: Subject */}
-          <div className="space-y-space-2xs">
-            <label className="block font-label-mono-sm text-label-mono-sm uppercase text-secondary font-medium tracking-wide" htmlFor="subjectInput">
-              Subject <span className="text-error">*</span>
+          <div>
+            <label htmlFor="subject" className="block font-label-mono-sm text-label-mono-sm uppercase text-secondary mb-1.5">
+              Subject
             </label>
-            <div className="relative flex items-center">
-              <span className="material-symbols-outlined absolute left-3 text-secondary text-[20px] pointer-events-none">menu_book</span>
-              <input 
-                id="subjectInput" 
-                type="text" 
-                required 
-                value={subject}
-                onChange={e => setSubject(e.target.value)}
-                className="w-full pl-10 pr-3 h-11 bg-surface-container-low rounded-lg font-body-md text-body-md text-on-surface placeholder:text-outline focus:bg-surface-container-lowest focus:outline-none focus:ring-2 focus:ring-primary transition-all" 
-                placeholder="e.g. Database Management System" 
-              />
-            </div>
+            <input
+              id="subject"
+              type="text"
+              maxLength={100}
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              placeholder="e.g. Database Management Systems"
+              className="w-full h-11 px-3 rounded-lg bg-surface-container-low text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
           </div>
 
-          {/* Field 3: Description (Optional) */}
-          <div className="space-y-space-2xs">
-            <div className="flex items-center justify-between">
-              <label className="block font-label-mono-sm text-label-mono-sm uppercase text-secondary font-medium tracking-wide" htmlFor="descInput">
-                Description
-              </label>
-              <span className="font-label-mono-sm text-label-mono-sm text-outline">Optional</span>
-            </div>
-            <div className="relative">
-              <textarea 
-                id="descInput" 
-                rows={3}
-                value={desc}
-                onChange={e => setDesc(e.target.value)}
-                className="w-full p-3 bg-surface-container-low rounded-lg font-body-md text-body-md text-on-surface placeholder:text-outline focus:bg-surface-container-lowest focus:outline-none focus:ring-2 focus:ring-primary transition-all resize-none" 
-                placeholder="Describe syllabus coverage or schedule requirements..."
-              ></textarea>
-            </div>
+          <div>
+            <label htmlFor="description" className="block font-label-mono-sm text-label-mono-sm uppercase text-secondary mb-1.5">
+              Description <span className="text-outline">(optional)</span>
+            </label>
+            <textarea
+              id="description"
+              rows={3}
+              maxLength={500}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Syllabus coverage or schedule notes…"
+              className="w-full p-3 rounded-lg bg-surface-container-low text-on-surface resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
           </div>
 
-          {/* Configuration Toggles */}
-          <div className="space-y-space-xs pt-space-2xs">
-            <span className="font-label-mono-sm text-label-mono-sm uppercase text-secondary font-medium tracking-wide block">
-              Room Governance & Telemetry
-            </span>
-            
-            {/* Toggle: Instant Room Leaderboard */}
-            <div className="p-space-sm rounded-lg bg-surface-container-low flex items-center justify-between">
-              <div className="flex items-start gap-space-xs pr-space-xs">
-                <span className="material-symbols-outlined text-primary text-[20px] mt-0.5">leaderboard</span>
-                <div>
-                  <span className="font-body-md text-body-md font-semibold text-on-surface block">Enable Instant Room Leaderboard</span>
-                  <span className="font-body-sm text-body-sm text-secondary block">Stream realtime percentiles and accuracy scores post-test.</span>
-                </div>
-              </div>
-              <button 
-                type="button" 
-                onClick={() => setInstantLeaderboard(!instantLeaderboard)}
-                className={`w-12 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors shrink-0 ${instantLeaderboard ? 'bg-primary' : 'bg-outline-variant'}`}
-              >
-                <div className={`bg-on-primary w-4 h-4 rounded-full shadow-sm transform transition-transform ${instantLeaderboard ? 'translate-x-6' : 'translate-x-0'}`}></div>
-              </button>
-            </div>
-
-            {/* Toggle: Camera Proctoring Active */}
-            <div className="p-space-sm rounded-lg bg-surface-container-low flex items-center justify-between">
-              <div className="flex items-start gap-space-xs pr-space-xs">
-                <span className="material-symbols-outlined text-tertiary text-[20px] mt-0.5">visibility</span>
-                <div>
-                  <span className="font-body-md text-body-md font-semibold text-on-surface block">Camera Proctoring Active</span>
-                  <span className="font-body-sm text-body-sm text-secondary block">Require periodic webcam verification snapshots during assessment.</span>
-                </div>
-              </div>
-              <button 
-                type="button" 
-                onClick={() => setCameraProctoring(!cameraProctoring)}
-                className={`w-12 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors shrink-0 ${cameraProctoring ? 'bg-primary' : 'bg-outline-variant'}`}
-              >
-                <div className={`bg-on-primary w-4 h-4 rounded-full shadow-sm transform transition-transform ${cameraProctoring ? 'translate-x-6' : 'translate-x-0'}`}></div>
-              </button>
-            </div>
-          </div>
-
-          {/* Interactive Notice Banner */}
-          <div className="p-space-sm rounded-lg bg-surface-container-high flex items-start gap-space-xs">
-            <span className="material-symbols-outlined text-primary text-[20px] shrink-0 mt-0.5">qr_code_2</span>
-            <p className="font-body-sm text-body-sm text-on-surface">
-              A unique <span className="font-label-mono text-label-mono font-semibold text-primary">6-character Room ID</span> and instant QR code will be generated upon creation for student self-enrollment.
-            </p>
-          </div>
-
-          {/* Action Buttons */}
-          <div className="pt-space-xs pb-space-sm flex items-center gap-space-xs sticky bottom-0 bg-surface-container-lowest mt-4 py-2 border-t border-surface-container-low">
-            <button 
-              type="button" 
+          <div className="flex gap-2 pt-1">
+            <button
+              type="button"
               onClick={() => router.back()}
-              className="flex-1 h-11 px-space-md rounded-lg bg-surface-container font-headline-sm text-headline-sm text-on-surface hover:bg-surface-container-high active:scale-[0.98] transition-all flex items-center justify-center"
+              className="flex-1 h-11 rounded-lg bg-surface-container text-on-surface font-headline-sm text-headline-sm"
             >
               Cancel
             </button>
-            <button 
-              type="submit" 
-              disabled={loading || created}
-              className={`flex-[2] h-11 px-space-md rounded-lg font-headline-sm text-headline-sm text-on-primary active:scale-[0.98] transition-all flex items-center justify-center gap-space-xs shadow-sm ${created ? 'bg-tertiary' : 'bg-primary hover:bg-primary-container'}`}
+            <button
+              type="submit"
+              disabled={saving}
+              className="flex-[2] h-11 rounded-lg bg-primary text-on-primary font-headline-sm text-headline-sm flex items-center justify-center gap-2 disabled:opacity-70"
             >
-              {loading ? (
-                <>
-                  <span>Generating...</span>
-                  <span className="material-symbols-outlined animate-spin text-[18px]">progress_activity</span>
-                </>
-              ) : created ? (
-                <>
-                  <span>Created: #K7M4P2</span>
-                  <span className="material-symbols-outlined text-[18px]">check_circle</span>
-                </>
-              ) : (
-                <>
-                  <span>Create Room</span>
-                  <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
-                </>
-              )}
+              {saving && <span className="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>}
+              {saving ? 'Creating…' : 'Create room'}
             </button>
           </div>
         </form>

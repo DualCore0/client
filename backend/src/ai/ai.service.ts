@@ -1,11 +1,31 @@
-import { Injectable, NotFoundException, ForbiddenException, InternalServerErrorException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  InternalServerErrorException,
+  Logger,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma.service.js';
 import { ConfigService } from '@nestjs/config';
 import { QdrantClient } from '@qdrant/js-client-rest';
 import { GenerateTestDto } from './ai.dto.js';
+import {
+  fallbackQuestions,
+  generateQuestionsWithLlm,
+  normalizeQuestions,
+  GeneratedQuestion,
+} from '../common/question-generator.js';
+
+const MAX_DIFFICULTY_LABEL: Record<string, string> = {
+  EASY: 'straightforward recall and definition',
+  MEDIUM: 'application and understanding',
+  HARD: 'analysis, edge cases and multi-step reasoning',
+};
 
 @Injectable()
 export class AiService {
+  private readonly logger = new Logger(AiService.name);
   private qdrantClient: QdrantClient;
 
   constructor(
@@ -18,8 +38,49 @@ export class AiService {
     });
   }
 
+  /**
+   * Retrieves the study context for a document. Tries Qdrant (RAG retrieval)
+   * and falls back to the text extracted from the PDF at upload time so the
+   * flow still works if the vector store is unavailable.
+   */
+  private async retrieveContext(documentId: string, topic?: string): Promise<string> {
+    let context = '';
+
+    try {
+      const res: any = await this.qdrantClient.scroll('knowledge_base', {
+        filter: { must: [{ key: 'docId', match: { value: documentId } }] },
+        limit: 30,
+        with_payload: true,
+      });
+      const chunks: string[] = (res?.points || [])
+        .map((p: any) => (p?.payload?.text as string) || '')
+        .filter((t: string) => t.trim().length > 0);
+      if (chunks.length) {
+        // Prefer chunks that mention the requested topic.
+        if (topic) {
+          const needle = topic.toLowerCase();
+          chunks.sort((a, b) => Number(b.toLowerCase().includes(needle)) - Number(a.toLowerCase().includes(needle)));
+        }
+        context = chunks.join('\n\n');
+      }
+    } catch (error: any) {
+      this.logger.warn(`Qdrant retrieval failed for document ${documentId}: ${error?.message || error}`);
+    }
+
+    if (!context.trim()) {
+      const doc = await this.prisma.document.findUnique({
+        where: { id: documentId },
+        select: { extractedText: true },
+      });
+      context = doc?.extractedText || '';
+    }
+
+    // Keep the prompt within a sane size.
+    return context.slice(0, 24000);
+  }
+
   async generateTest(dto: GenerateTestDto, userId: string) {
-    // 1. Verify access
+    // 1. Authorisation
     const room = await this.prisma.room.findUnique({ where: { id: dto.roomId } });
     if (!room) throw new NotFoundException('Room not found');
     if (room.teacherId !== userId) throw new ForbiddenException('Only the room teacher can generate tests');
@@ -28,116 +89,91 @@ export class AiService {
     if (!document || document.roomId !== dto.roomId) {
       throw new NotFoundException('Document not found in this room');
     }
-    if (document.status !== 'READY') {
-      throw new InternalServerErrorException('Document is not ready for processing');
+    if (document.status === 'PROCESSING') {
+      throw new BadRequestException('Document is still being processed. Try again in a moment.');
+    }
+    if (document.status === 'FAILED') {
+      throw new BadRequestException(
+        `Text extraction failed for "${document.fileName}". ${document.error || 'Please upload another PDF.'}`,
+      );
     }
 
-    // 2. Fetch chunks from Qdrant
-    let context = '';
-    try {
-      const res = await this.qdrantClient.scroll('knowledge_base', {
-        filter: {
-          must: [{ key: 'docId', match: { value: dto.documentId } }]
-        },
-        limit: 20, // get up to 20 chunks for context
-      });
-      const chunks = res.points.map(p => (p.payload?.text as string) || '');
-      context = chunks.join('\n\n');
-    } catch (e) {
-      console.error('Qdrant error:', e);
-      // Fallback if Qdrant is not set up correctly
-      context = "No context retrieved. Fallback mode.";
+    // 2. Retrieve study context (RAG)
+    const context = await this.retrieveContext(dto.documentId, dto.topic);
+    if (!context.trim()) {
+      throw new BadRequestException(
+        'No readable text was found in this PDF. Scanned documents need OCR, which is out of scope for the MVP.',
+      );
     }
 
-    // 3. Prompt LLM
-    const prompt = `You are a test generator. Based on the following document context, generate exactly ${dto.questionCount} multiple-choice questions.
-The difficulty should be ${dto.difficulty || 'mixed'}.
-Context:
+    // 3. Prompt the LLM
+    const difficultyHint =
+      MAX_DIFFICULTY_LABEL[(dto.difficulty || 'MEDIUM').toUpperCase()] || MAX_DIFFICULTY_LABEL.MEDIUM;
+    const prompt = `Generate exactly ${dto.questionCount} multiple-choice questions for a class test.
+
+Rules:
+- Base every question ONLY on the study material provided below.
+- Each question must have exactly 4 distinct options and exactly one correct answer.
+- "correctAnswer" must be the 0-based index (0, 1, 2 or 3) of the correct option.
+- Questions should test ${difficultyHint}.
+- Do not repeat questions or options.
+
+Study material:
+"""
 ${context}
+"""
 
-Return ONLY valid JSON in this exact structure, nothing else:
-{
-  "questions": [
-    {
-      "question": "Question text here",
-      "options": ["Option 1", "Option 2", "Option 3", "Option 4"],
-      "correctAnswer": 0, // index (0-3) of correct option
-      "difficulty": "EASY" // or MEDIUM or HARD
-    }
-  ]
-}
-`;
+Respond with raw JSON only, in this exact shape:
+{"questions":[{"question":"...","options":["...","...","...","..."],"correctAnswer":0,"difficulty":"${(dto.difficulty || 'MEDIUM').toUpperCase()}"}]}`;
 
-    let generatedQuestions = [];
-    const openrouterKey = this.configService.get<string>('OPENROUTER_API_KEY');
-    
-    if (!openrouterKey) {
-      // Mock generation for testing if no key provided
-      generatedQuestions = Array.from({ length: dto.questionCount }).map((_, i) => ({
-        question: `Mock Question ${i + 1} based on document?`,
-        options: ["Option A", "Option B", "Option C", "Option D"],
-        correctAnswer: 0,
-        difficulty: "MEDIUM"
-      }));
+    const apiKey = this.configService.get<string>('OPENROUTER_API_KEY');
+    let questions: GeneratedQuestion[];
+
+    if (!apiKey) {
+      this.logger.warn('OPENROUTER_API_KEY is not set — using offline fallback questions.');
+      questions = fallbackQuestions(dto.topic || document.fileName, dto.questionCount, dto.difficulty);
     } else {
       try {
-        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${openrouterKey}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            model: 'google/gemini-pro',
-            messages: [{ role: 'user', content: prompt }]
-          })
+        questions = await generateQuestionsWithLlm({
+          apiKey,
+          prompt,
+          expected: dto.questionCount,
         });
-        
-        if (!response.ok) {
-          throw new Error('LLM API error');
-        }
-        
-        const data = await response.json();
-        const text = data.choices[0].message.content;
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : text);
-        generatedQuestions = parsed.questions || [];
-      } catch (e) {
-        console.error('LLM parsing error:', e);
-        throw new InternalServerErrorException('Failed to generate valid questions from AI');
+      } catch (error: any) {
+        this.logger.error(`AI generation failed: ${error?.message || error}`);
+        throw new InternalServerErrorException(
+          'The AI could not produce valid questions for this document. Please try again.',
+        );
       }
     }
 
-    // Validate generated output
-    if (!Array.isArray(generatedQuestions) || generatedQuestions.length === 0) {
-      throw new InternalServerErrorException('AI did not return any questions');
-    }
-
-    // 4. Save Test as DRAFT
-    const test = await this.prisma.test.create({
+    // 4. Save as DRAFT — a teacher must review before publishing.
+    return this.prisma.test.create({
       data: {
         title: dto.title,
+        topic: dto.topic || null,
         duration: dto.duration,
-        questionCount: generatedQuestions.length,
-        difficulty: dto.difficulty,
+        questionCount: questions.length,
+        difficulty: dto.difficulty || 'MEDIUM',
         status: 'DRAFT',
         roomId: dto.roomId,
         documentId: dto.documentId,
         creatorId: userId,
         questions: {
-          create: generatedQuestions.map(q => ({
-            questionText: q.question,
+          create: questions.map((q) => ({
+            questionText: q.questionText,
             options: q.options,
             correctAnswer: q.correctAnswer,
-            difficulty: q.difficulty || 'MEDIUM',
-          }))
-        }
+            difficulty: q.difficulty,
+          })),
+        },
       },
-      include: {
-        questions: true,
-      }
+      include: { questions: true, document: { select: { id: true, fileName: true } } },
     });
+  }
 
-    return test;
+  /** Validates a raw question array (exposed for tests). */
+  validate(raw: unknown): GeneratedQuestion[] {
+    return normalizeQuestions(raw);
   }
 }

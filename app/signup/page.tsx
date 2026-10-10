@@ -3,9 +3,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { register, type AuthUser, type Role } from "@/lib/api";
+import { useAuth } from "@/components/AuthProvider";
 
 export default function Signup() {
   const router = useRouter();
+  const { signIn } = useAuth();
   
   const [role, setRole] = useState<"student" | "teacher">("student");
   const [fullname, setFullname] = useState("");
@@ -16,6 +19,7 @@ export default function Signup() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [createdRole, setCreatedRole] = useState<Role>("STUDENT");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -34,12 +38,16 @@ export default function Signup() {
   
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!fullname) {
+    if (!fullname.trim()) {
       setErrorMsg("Please enter your full official name.");
       return;
     }
     if (!isValidEmail) {
       setErrorMsg("Valid email address required.");
+      return;
+    }
+    if (password.length < 8) {
+      setErrorMsg("Password must be at least 8 characters long.");
       return;
     }
     if (password !== confirmPassword) {
@@ -51,22 +59,19 @@ export default function Signup() {
     setErrorMsg("");
 
     try {
-      const res = await fetch("/api-backend/auth/signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, fullname, role: role.toUpperCase() }),
+      const data = await register({
+        email: email.trim(),
+        password,
+        fullname: fullname.trim(),
+        role: role.toUpperCase() as Role,
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.message || "Signup failed");
-      }
-      // Store token
-      localStorage.setItem("token", data.access_token);
-      setLoading(false);
+      await signIn(data.access_token, data.user as AuthUser);
+      setCreatedRole(data.user.role);
       setShowSuccessModal(true);
-    } catch (err: any) {
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Signup failed");
+    } finally {
       setLoading(false);
-      setErrorMsg(err.message);
     }
   };
 
@@ -380,7 +385,9 @@ export default function Signup() {
                 </div>
                 <h3 className="font-headline-md text-headline-md text-on-surface">Account Created!</h3>
                 <p className="font-body-md text-body-md text-on-surface-variant mt-1.5">
-                  Redirecting to Room selection & cohort matching...
+                  {createdRole === "TEACHER"
+                    ? "Create your first room to share assessment codes with students."
+                    : "Join a classroom with the code your teacher shared."}
                 </p>
               </div>
               <div className="w-full bg-surface-container-high rounded-full h-1.5 overflow-hidden">
@@ -388,10 +395,16 @@ export default function Signup() {
               </div>
               <div className="pt-2">
                 <button 
-                  onClick={() => router.push(role === 'student' ? '/join' : '/rooms/K7M4P2')}
-                  className="w-full py-2 bg-surface-container-low text-on-surface font-headline-sm text-headline-sm rounded-lg hover:bg-surface-container transition-colors"
+                  onClick={() => router.push(createdRole === 'STUDENT' ? '/join' : '/rooms/create')}
+                  className="w-full py-2 bg-primary text-on-primary font-headline-sm text-headline-sm rounded-lg hover:bg-primary-container transition-colors"
                 >
-                  Dismiss & Enter Classroom
+                  {createdRole === "TEACHER" ? "Create my first room" : "Join my first room"}
+                </button>
+                <button 
+                  onClick={() => router.push(createdRole === 'STUDENT' ? '/dashboard' : '/rooms')}
+                  className="w-full py-2 mt-2 text-on-surface-variant font-body-sm text-body-sm"
+                >
+                  Skip for now
                 </button>
               </div>
             </div>

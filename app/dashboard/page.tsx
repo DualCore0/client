@@ -1,211 +1,322 @@
-"use client";
+'use client';
 
-import { useState , useEffect} from "react";
-import { BottomNav } from "@/components/BottomNav";
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import {
+  formatDate,
+  getRooms,
+  getSubmissions,
+  getTests,
+  percent,
+  type Room,
+  type Submission,
+  type TestSummary,
+} from '@/lib/api';
+import { useAuth, useRequireAuth } from '@/components/AuthProvider';
+import { BottomNav, TopBar } from '@/components/BottomNav';
+import { EmptyState, ErrorState, LoadingState, StatCard } from '@/components/States';
 
-import Link from "next/link";
+type View = 'upcoming' | 'completed';
 
-export default function Dashboard() {
-  const [activeView, setActiveView] = useState("upcoming");
-  const [upcoming, setUpcoming] = useState<any[]>([]);
-  const [completed, setCompleted] = useState<any[]>([]);
-  
+export default function DashboardPage() {
+  const router = useRouter();
+  const { user, ready } = useRequireAuth();
+  const { signOut } = useAuth();
+
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [tests, setTests] = useState<TestSummary[]>([]);
+  const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<View>('upcoming');
+
+  const load = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const [roomList, testList, subs] = await Promise.all([
+        getRooms(),
+        getTests(),
+        user.role === 'STUDENT' ? getSubmissions() : Promise.resolve<Submission[]>([]),
+      ]);
+      setRooms(roomList);
+      setTests(testList);
+      setSubmissions(subs);
+    } catch (err) {
+      if (err instanceof Error && err.message.toLowerCase().includes('401')) signOut();
+      setError(err instanceof Error ? err.message : 'Could not load your dashboard.');
+    } finally {
+      setLoading(false);
+    }
+  }, [user, signOut]);
+
   useEffect(() => {
-    import('../../lib/api').then(({ getRooms, getSubmissions }) => {
-      Promise.all([getRooms(), getSubmissions()]).then(([rooms, submissions]) => {
-        // Map backend data to frontend expected shapes
-        setUpcoming(rooms.flatMap((r: any) => (r.tests || []).map((t: any) => ({
-          id: t.id,
-          title: t.title,
-          roomName: r.name,
-          roomId: r.id,
-          date: new Date(t.createdAt).toLocaleDateString(),
-          time: new Date(t.createdAt).toLocaleTimeString(),
-          duration: t.duration ? `${t.duration} min` : 'Untimed',
-          details: t.topic || 'General Assessment'
-        }))));
-        setCompleted(submissions.map((s: any) => ({
-          id: s.id,
-          title: s.test?.title || 'Assessment',
-          room: s.test?.room?.name || 'Classroom',
-          date: new Date(s.startTime).toLocaleDateString(),
-          score: `${s.result?.score || 0}/${s.result?.maxScore || 100}`,
-          percentile: 90, // mock percentile
-          passRate: 85,
-          failRate: 15,
-          topScorer: 'N/A'
-        })));
-      }).catch(console.error);
-    });
-  }, []);
+    if (ready) void load();
+  }, [ready, load]);
+
+  const isTeacher = user?.role === 'TEACHER';
+
+  const completed = useMemo(() => submissions.filter((s) => s.submittedAt), [submissions]);
+
+  const averageScore = useMemo(() => {
+    const scored = completed.map((s) => s.percentage).filter((p): p is number => typeof p === 'number');
+    if (!scored.length) return null;
+    return scored.reduce((a, b) => a + b, 0) / scored.length;
+  }, [completed]);
+
+  const completedTestIds = useMemo(() => new Set(completed.map((s) => s.testId)), [completed]);
+  const studentTodo = useMemo(
+    () => tests.filter((t) => !completedTestIds.has(t.id)),
+    [tests, completedTestIds],
+  );
 
   return (
     <div className="flex-1 w-full bg-surface pb-24 min-h-screen">
-      
-      {/* Header */}
-      <header className="fixed top-0 w-full z-40 pt-safe bg-surface/85 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)]">
-        <div className="h-16 px-gutter-mobile flex items-center justify-between">
-          <div className="flex flex-col">
-            <span className="font-label-mono-sm text-label-mono-sm uppercase text-primary font-semibold tracking-wide">
-              Overview
-            </span>
-            <h1 className="font-headline-sm text-headline-sm text-on-surface leading-tight">Global Dashboard</h1>
-          </div>
-          <button className="relative p-2 text-on-surface-variant hover:text-on-surface rounded-lg bg-surface-container-low transition-colors">
-            <span className="material-symbols-outlined text-[22px]">notifications</span>
-            <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-primary ring-2 ring-surface"></span>
-          </button>
-        </div>
-      </header>
+      <TopBar
+        title={`Welcome back${user?.fullname ? `, ${user.fullname.split(' ')[0]}` : ''}`}
+        subtitle={isTeacher ? 'Teacher overview' : 'Student overview'}
+      />
 
-      <div className="pt-20 px-margin-mobile flex flex-col gap-space-md">
-        
-        {/* Welcome Section */}
-        <div className="flex flex-col gap-1">
-          <h2 className="font-headline-md text-headline-md text-on-surface">Welcome back, Jordan!</h2>
-          <p className="font-body-sm text-body-sm text-on-surface-variant">Here is your academic assessment schedule.</p>
-        </div>
+      <div className="pt-20 px-gutter-mobile max-w-3xl mx-auto flex flex-col gap-4">
+        {loading && <LoadingState label="Loading your dashboard…" />}
+        {!loading && error && <ErrorState message={error} onRetry={load} />}
 
-        {/* Global Stats / Tabs */}
-        <div className="grid grid-cols-2 gap-space-2xs">
-          <button 
-            onClick={() => setActiveView('upcoming')}
-            className={`text-left p-space-sm rounded-xl shadow-sm border transition-all flex flex-col ${activeView === 'upcoming' ? 'bg-primary/5 border-primary/20' : 'bg-surface-container-lowest border-surface-container hover:bg-surface-container-low'}`}
-          >
-            <span className={`font-label-mono-sm text-label-mono-sm uppercase flex items-center gap-1 ${activeView === 'upcoming' ? 'text-primary' : 'text-secondary'}`}>
-              <span className="material-symbols-outlined text-[14px]">event_note</span> Upcoming
-            </span>
-            <span className={`font-stat-mono-lg text-stat-mono-lg mt-1 ${activeView === 'upcoming' ? 'text-primary' : 'text-on-surface'}`}>
-              {upcoming.length} <span className="text-sm font-body-sm text-on-surface-variant font-medium">Exams</span>
-            </span>
-          </button>
-          
-          <button 
-            onClick={() => setActiveView('completed')}
-            className={`text-left p-space-sm rounded-xl shadow-sm border transition-all flex flex-col ${activeView === 'completed' ? 'bg-primary/5 border-primary/20' : 'bg-surface-container-lowest border-surface-container hover:bg-surface-container-low'}`}
-          >
-            <span className={`font-label-mono-sm text-label-mono-sm uppercase flex items-center gap-1 ${activeView === 'completed' ? 'text-primary' : 'text-secondary'}`}>
-              <span className="material-symbols-outlined text-[14px]">assignment_turned_in</span> Completed
-            </span>
-            <span className={`font-stat-mono-lg text-stat-mono-lg mt-1 ${activeView === 'completed' ? 'text-primary' : 'text-on-surface'}`}>
-              {completed.length} <span className="text-sm font-body-sm text-on-surface-variant font-medium">Exams</span>
-            </span>
-          </button>
-        </div>
+        {!loading && !error && (
+          <>
+            <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <StatCard label="Rooms" value={rooms.length} icon="meeting_room" tone="primary" />
+              {isTeacher ? (
+                <>
+                  <StatCard label="Tests" value={tests.length} icon="assignment" />
+                  <StatCard
+                    label="Published"
+                    value={tests.filter((t) => t.status === 'PUBLISHED').length}
+                    icon="public"
+                    tone="tertiary"
+                  />
+                  <StatCard
+                    label="Attempts"
+                    value={tests.reduce((a, t) => a + (t._count?.submissions ?? 0), 0)}
+                    icon="how_to_reg"
+                  />
+                </>
+              ) : (
+                <>
+                  <StatCard label="To take" value={studentTodo.length} icon="pending_actions" />
+                  <StatCard label="Completed" value={completed.length} icon="task_alt" tone="tertiary" />
+                  <StatCard
+                    label="Average"
+                    value={averageScore === null ? '—' : percent(averageScore, 0)}
+                    icon="trending_up"
+                    tone="primary"
+                  />
+                </>
+              )}
+            </section>
 
-        {/* Content Area */}
-        <div className="flex flex-col gap-space-xs mt-2">
-          <div className="flex items-center justify-between">
-            <h2 className="font-headline-sm text-headline-sm text-on-surface">
-              {activeView === 'upcoming' ? 'Upcoming Assessments' : 'Completed Assessments'}
-            </h2>
-          </div>
+            {!isTeacher && (
+              <section className="grid grid-cols-2 gap-3">
+                <Link
+                  href="/join"
+                  className="rounded-xl bg-primary text-on-primary p-4 flex flex-col gap-1 hover:bg-primary-container transition-colors"
+                >
+                  <span className="material-symbols-outlined text-[22px]">vpn_key</span>
+                  <span className="font-headline-sm text-headline-sm">Join a room</span>
+                  <span className="font-body-sm text-[12px] opacity-90">Enter your teacher code</span>
+                </Link>
+                <Link
+                  href="/leaderboard"
+                  className="rounded-xl bg-surface-container-lowest border border-surface-container p-4 flex flex-col gap-1 hover:bg-surface-container-low transition-colors"
+                >
+                  <span className="material-symbols-outlined text-[22px] text-primary">leaderboard</span>
+                  <span className="font-headline-sm text-headline-sm text-on-surface">Weekly ranks</span>
+                  <span className="font-body-sm text-[12px] text-on-surface-variant">See where you stand</span>
+                </Link>
+              </section>
+            )}
 
-          <div className="flex flex-col gap-space-sm">
-            {activeView === 'upcoming' && upcoming.map((exam) => (
-              <div key={exam.id} className="bg-surface-container-lowest rounded-xl shadow-sm border border-surface-container overflow-hidden animate-in fade-in duration-300">
-                <div className="p-space-md flex flex-col gap-space-xs relative">
-                  <div className="absolute top-0 left-0 bottom-0 w-1 bg-tertiary"></div>
-                  
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex flex-col min-w-0">
-                      <span className="font-label-mono-sm text-label-mono-sm text-tertiary font-semibold uppercase tracking-wide bg-tertiary-container/10 px-2 py-0.5 rounded self-start mb-1">
-                        {exam.date} • {exam.time}
-                      </span>
-                      <h3 className="font-headline-sm text-headline-sm text-on-surface truncate">{exam.title}</h3>
-                      <Link href={`/rooms/${exam.roomId}`} className="font-body-sm text-[13px] text-secondary hover:text-primary transition-colors flex items-center gap-1 mt-0.5 truncate">
-                        <span className="material-symbols-outlined text-[14px]">meeting_room</span>
-                        {exam.roomName}
-                      </Link>
-                    </div>
-                  </div>
+            {isTeacher && (
+              <section className="grid grid-cols-2 gap-3">
+                <Link
+                  href="/rooms/create"
+                  className="rounded-xl bg-primary text-on-primary p-4 flex flex-col gap-1 hover:bg-primary-container transition-colors"
+                >
+                  <span className="material-symbols-outlined text-[22px]">add_circle</span>
+                  <span className="font-headline-sm text-headline-sm">Create a room</span>
+                  <span className="font-body-sm text-[12px] opacity-90">Auto-generates a join code</span>
+                </Link>
+                <Link
+                  href="/tests/create"
+                  className="rounded-xl bg-surface-container-lowest border border-surface-container p-4 flex flex-col gap-1 hover:bg-surface-container-low transition-colors"
+                >
+                  <span className="material-symbols-outlined text-[22px] text-primary">auto_awesome</span>
+                  <span className="font-headline-sm text-headline-sm text-on-surface">Generate a test</span>
+                  <span className="font-body-sm text-[12px] text-on-surface-variant">Upload a PDF to start</span>
+                </Link>
+              </section>
+            )}
 
-                  <div className="flex items-center gap-3 mt-1 pt-3 border-t border-surface-container-low">
-                    <div className="flex items-center gap-1 font-label-mono-sm text-label-mono-sm text-on-surface-variant">
-                      <span className="material-symbols-outlined text-[14px]">schedule</span>
-                      {exam.duration}
-                    </div>
-                    <span className="w-1 h-1 rounded-full bg-outline-variant"></span>
-                    <div className="font-label-mono-sm text-label-mono-sm text-on-surface-variant truncate">
-                      {exam.details}
-                    </div>
-                  </div>
-                  <Link href={`/tests/${exam.id}`} className="mt-4 w-full h-11 bg-primary hover:bg-primary-container text-on-primary rounded-lg font-headline-sm text-[14px] font-medium flex items-center justify-center gap-2 transition-all shadow-sm active:scale-[0.99]">
-                    <span>Take Assessment</span>
-                    <span className="material-symbols-outlined text-[18px]">play_arrow</span>
+            {/* Lists */}
+            {isTeacher ? (
+              <section className="flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <h2 className="font-headline-sm text-headline-sm text-on-surface">Your rooms</h2>
+                  <Link href="/rooms" className="font-label-mono-sm text-label-mono-sm text-primary uppercase">
+                    View all
                   </Link>
                 </div>
-              </div>
-            ))}
-
-            {activeView === 'completed' && completed.map((test) => (
-              <div key={test.id} className="bg-surface-container-lowest rounded-xl shadow-sm border border-surface-container overflow-hidden animate-in fade-in duration-300 flex flex-col">
-                <div className="p-space-md flex flex-col gap-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex flex-col min-w-0">
-                      <span className="font-label-mono-sm text-[10px] text-secondary uppercase tracking-wider mb-1">
-                        {test.date}
+                {rooms.length === 0 ? (
+                  <EmptyState
+                    icon="meeting_room"
+                    title="No rooms yet"
+                    description="Create your first classroom to start sharing tests."
+                    action={
+                      <Link
+                        href="/rooms/create"
+                        className="inline-flex h-10 px-4 items-center rounded-lg bg-primary text-on-primary font-headline-sm text-[14px]"
+                      >
+                        Create a room
+                      </Link>
+                    }
+                  />
+                ) : (
+                  rooms.slice(0, 4).map((room) => (
+                    <Link
+                      key={room.id}
+                      href={`/rooms/${room.code}`}
+                      className="rounded-xl bg-surface-container-lowest border border-surface-container p-4 flex items-center gap-3 hover:bg-surface-container-low transition-colors"
+                    >
+                      <span className="w-10 h-10 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-label-mono-sm font-bold shrink-0">
+                        {room.code.slice(0, 2)}
                       </span>
-                      <h3 className="font-headline-sm text-headline-sm text-on-surface truncate">
-                        {test.title}
-                      </h3>
-                      <p className="font-body-sm text-[13px] text-on-surface-variant truncate mt-0.5 flex items-center gap-1">
-                        <span className="material-symbols-outlined text-[14px]">meeting_room</span>
-                        {test.room}
-                      </p>
-                    </div>
-                    <div className="flex flex-col items-end shrink-0">
-                      <span className="font-stat-mono-lg text-[18px] text-primary leading-tight">{test.score}</span>
-                      <span className="font-label-mono-sm text-[10px] text-tertiary font-bold">{test.percentile} PRCTL</span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 mt-2 pt-3 border-t border-surface-container-low">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="font-label-mono-sm text-[10px] uppercase text-secondary">Pass Rate</span>
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-full bg-surface-container h-1.5 rounded-full overflow-hidden">
-                          <div className="bg-tertiary h-full rounded-full" style={{ width: `${test.passRate}%` }}></div>
-                        </div>
-                        <span className="font-stat-mono-lg text-[13px] text-tertiary leading-none">{test.passRate}%</span>
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-0.5 pl-2 border-l border-surface-container-low">
-                      <span className="font-label-mono-sm text-[10px] uppercase text-secondary">Fail Rate</span>
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-full bg-surface-container h-1.5 rounded-full overflow-hidden">
-                          <div className="bg-error h-full rounded-full" style={{ width: `${test.failRate}%` }}></div>
-                        </div>
-                        <span className="font-stat-mono-lg text-[13px] text-error leading-none">{test.failRate}%</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-2 p-2.5 bg-surface-container-low rounded-lg flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-full bg-primary text-on-primary flex items-center justify-center">
-                        <span className="material-symbols-outlined text-[14px]" style={{ fontVariationSettings: "'FILL' 1" }}>military_tech</span>
-                      </div>
-                      <span className="font-label-mono-sm text-[11px] uppercase text-secondary font-medium">Top Scorer</span>
-                    </div>
-                    <span className="font-body-sm text-[13px] font-bold text-on-surface">{test.topScorer}</span>
-                  </div>
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-headline-sm text-headline-sm text-on-surface truncate">
+                          {room.name}
+                        </span>
+                        <span className="block font-body-sm text-[12px] text-on-surface-variant">
+                          #{room.code} • {room._count?.members ?? 0} students • {room._count?.tests ?? 0} tests
+                        </span>
+                      </span>
+                      <span className="material-symbols-outlined text-on-surface-variant">chevron_right</span>
+                    </Link>
+                  ))
+                )}
+              </section>
+            ) : (
+              <section className="flex flex-col gap-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setView('upcoming')}
+                    className={`rounded-xl border p-3 text-left transition-colors ${
+                      view === 'upcoming'
+                        ? 'border-primary/30 bg-primary/5'
+                        : 'border-surface-container bg-surface-container-lowest'
+                    }`}
+                  >
+                    <span className="block font-label-mono-sm text-label-mono-sm uppercase text-secondary">
+                      To take
+                    </span>
+                    <span className="block font-stat-mono-lg text-stat-mono-lg text-on-surface">
+                      {studentTodo.length}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setView('completed')}
+                    className={`rounded-xl border p-3 text-left transition-colors ${
+                      view === 'completed'
+                        ? 'border-primary/30 bg-primary/5'
+                        : 'border-surface-container bg-surface-container-lowest'
+                    }`}
+                  >
+                    <span className="block font-label-mono-sm text-label-mono-sm uppercase text-secondary">
+                      Completed
+                    </span>
+                    <span className="block font-stat-mono-lg text-stat-mono-lg text-on-surface">
+                      {completed.length}
+                    </span>
+                  </button>
                 </div>
-              </div>
-            ))}
 
-            {activeView === 'upcoming' && upcoming.length === 0 && (
-              <div className="bg-surface-container-lowest rounded-xl p-8 shadow-sm border border-surface-container text-center flex flex-col items-center justify-center gap-2">
-                <div className="w-12 h-12 rounded-full bg-surface-container-low text-secondary flex items-center justify-center">
-                  <span className="material-symbols-outlined text-[24px]">event_available</span>
-                </div>
-                <p className="font-body-md text-body-md text-on-surface font-medium mt-2">No upcoming exams</p>
-                <p className="font-body-sm text-body-sm text-on-surface-variant">You are all caught up!</p>
-              </div>
+                {view === 'upcoming' &&
+                  (studentTodo.length === 0 ? (
+                    <EmptyState
+                      icon="event_available"
+                      title="Nothing due right now"
+                      description="You have completed every published test in your rooms."
+                    />
+                  ) : (
+                    studentTodo.map((test) => (
+                      <article
+                        key={test.id}
+                        className="rounded-xl bg-surface-container-lowest border border-surface-container p-4 flex flex-col gap-3"
+                      >
+                        <div>
+                          <span className="block font-label-mono-sm text-label-mono-sm text-secondary">
+                            {test.room?.name || 'Room'} • {test._count?.questions ?? test.questionCount} questions
+                            {test.duration ? ` • ${test.duration} min` : ''}
+                          </span>
+                          <h3 className="font-headline-sm text-headline-sm text-on-surface mt-1">{test.title}</h3>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => router.push(`/tests/${test.id}`)}
+                          className="w-full h-11 rounded-lg bg-primary text-on-primary font-headline-sm text-[14px] flex items-center justify-center gap-2"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">play_arrow</span>
+                          Start assessment
+                        </button>
+                      </article>
+                    ))
+                  ))}
+
+                {view === 'completed' &&
+                  (completed.length === 0 ? (
+                    <EmptyState icon="assignment" title="No completed tests yet" description="Your results will appear here." />
+                  ) : (
+                    completed.map((submission) => {
+                      const total = (submission.correctAnswers ?? 0) + (submission.wrongAnswers ?? 0);
+                      const passed = (submission.percentage ?? 0) >= 40;
+                      return (
+                        <Link
+                          key={submission.id}
+                          href={`/tests/${submission.testId}/result?submission=${submission.id}`}
+                          className="rounded-xl bg-surface-container-lowest border border-surface-container p-4 flex items-center gap-3 hover:bg-surface-container-low transition-colors"
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="block font-label-mono-sm text-label-mono-sm text-secondary">
+                              {formatDate(submission.submittedAt)} • {submission.test?.room?.name || 'Assessment'}
+                            </span>
+                            <span className="block font-headline-sm text-headline-sm text-on-surface truncate mt-0.5">
+                              {submission.test?.title || 'Assessment'}
+                            </span>
+                            <span className="block font-body-sm text-[12px] text-on-surface-variant">
+                              {submission.correctAnswers ?? 0}/{total || '—'} correct
+                            </span>
+                          </span>
+                          <span className="text-right shrink-0">
+                            <span
+                              className={`block font-stat-mono-lg text-[20px] leading-none ${
+                                passed ? 'text-tertiary' : 'text-error'
+                              }`}
+                            >
+                              {percent(submission.percentage, 0)}
+                            </span>
+                            <span className="font-label-mono-sm text-[11px] text-secondary">
+                              {passed ? 'passed' : 'below pass'}
+                            </span>
+                          </span>
+                        </Link>
+                      );
+                    })
+                  ))}
+              </section>
             )}
-          </div>
-        </div>
-
+          </>
+        )}
       </div>
 
       <BottomNav />

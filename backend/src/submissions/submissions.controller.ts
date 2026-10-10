@@ -32,6 +32,13 @@ export class SubmissionsController {
     return this.submissionsService.getMySubmissions(req.user.userId);
   }
 
+  /** Attempt state + server deadline for a test (used by the test screen). */
+  @Get('attempt/:testId')
+  @Roles(Role.STUDENT)
+  getAttemptState(@Param('testId') testId: string, @Request() req: any) {
+    return this.submissionsService.getAttemptState(testId, req.user.userId);
+  }
+
   @Get(':id')
   @Roles(Role.STUDENT)
   getSubmissionDetails(@Param('id') id: string, @Request() req: any) {

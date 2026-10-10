@@ -72,6 +72,37 @@ export class RoomsService {
     });
   }
 
+  /**
+   * Public room preview used by /join/[code] before a student has joined.
+   * Exposes only non-sensitive room metadata.
+   */
+  async getRoomPreview(code: string) {
+    const room = await this.prisma.room.findUnique({
+      where: { code: code.toUpperCase() },
+      include: {
+        teacher: { select: { fullname: true, email: true } },
+        _count: { select: { members: true, tests: true } },
+      },
+    });
+    if (!room) throw new NotFoundException('Room not found');
+
+    const publishedTestCount = await this.prisma.test.count({
+      where: { roomId: room.id, status: 'PUBLISHED' },
+    });
+
+    return {
+      id: room.id,
+      code: room.code,
+      name: room.name,
+      subject: room.subject,
+      description: room.description,
+      instructor: room.teacher.fullname || room.teacher.email.split('@')[0],
+      memberCount: room._count.members,
+      testCount: publishedTestCount,
+      createdAt: room.createdAt,
+    };
+  }
+
   async getRoomDetails(roomId: string, userId: string, role: string) {
     const room = await this.prisma.room.findUnique({
       where: { id: roomId },

@@ -58,17 +58,69 @@ export class DocumentsService {
     return doc;
   }
 
+  /** Document + processing status, used by the teacher UI to poll until READY. */
+  async getDocument(id: string, userId: string) {
+    const doc = await this.prisma.document.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        roomId: true,
+        fileName: true,
+        status: true,
+        chunkCount: true,
+        error: true,
+        uploadedBy: true,
+        createdAt: true,
+        room: { select: { id: true, name: true, code: true, teacherId: true } },
+      },
+    });
+    if (!doc) throw new NotFoundException('Document not found');
+    if (doc.room.teacherId !== userId) throw new ForbiddenException('Not your document');
+    return doc;
+  }
+
+  async listDocuments(roomId: string, userId: string) {
+    const room = await this.prisma.room.findUnique({ where: { id: roomId } });
+    if (!room) throw new NotFoundException('Room not found');
+    if (room.teacherId !== userId) throw new ForbiddenException('Only the room teacher can list documents');
+
+    return this.prisma.document.findMany({
+      where: { roomId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        fileName: true,
+        status: true,
+        chunkCount: true,
+        error: true,
+        createdAt: true,
+        _count: { select: { tests: true } },
+      },
+    });
+  }
+
   private async processPdfBg(buffer: Buffer, docId: string, roomId: string) {
     // Parse PDF using pdf-parse v2 API
     const parser = new PDFParse({ data: new Uint8Array(buffer) });
-    const result = await parser.getText();
-    const text = result.text;
+    let text = '';
+    try {
+      const result = await parser.getText();
+      text = (result.text || '').trim();
+    } finally {
+      await parser.destroy?.().catch(() => {});
+    }
+
+    if (text.length < 40) {
+      throw new Error(
+        'No selectable text found in this PDF. Scanned documents require OCR, which is not part of the MVP.',
+      );
+    }
 
     // Chunk text (simple approach: split by newlines, group into ~500 chars)
     const chunks = [];
     const paragraphs = text.split(/\n\s*\n/);
     let currentChunk = '';
-    
+
     for (const p of paragraphs) {
       if (currentChunk.length + p.length > 500) {
         if (currentChunk.trim().length > 0) chunks.push(currentChunk.trim());
@@ -84,7 +136,7 @@ export class DocumentsService {
     const points = chunks.map((chunk, index) => {
       return {
         id: crypto.randomUUID(),
-        vector: new Array(768).fill(0).map(() => Math.random()), 
+        vector: new Array(768).fill(0).map(() => Math.random()),
         payload: {
           docId,
           roomId,
@@ -95,16 +147,28 @@ export class DocumentsService {
     });
 
     if (points.length > 0) {
-      await this.qdrantClient.upsert('knowledge_base', {
-        wait: true,
-        points
-      });
+      try {
+        await this.qdrantClient.upsert('knowledge_base', {
+          wait: true,
+          points
+        });
+      } catch (error: any) {
+        // Vector storage is an optimisation: the extracted text below keeps
+        // generation working when Qdrant is unavailable.
+        console.error('Qdrant upsert failed, continuing with stored text:', error?.message || error);
+      }
     }
 
-    // Mark READY
+    // Store the extracted text so retrieval works even without Qdrant,
+    // then mark READY.
     await this.prisma.document.update({
       where: { id: docId },
-      data: { status: DocumentStatus.READY }
+      data: {
+        status: DocumentStatus.READY,
+        extractedText: text.slice(0, 200000),
+        chunkCount: chunks.length,
+        error: null,
+      }
     });
   }
 }

@@ -73,6 +73,9 @@ model Document {
   fileName    String
   fileUrl     String
   status      DocumentStatus @default(PROCESSING)
+  extractedText String?      @db.Text
+  chunkCount  Int            @default(0)
+  error       String?        @db.Text
   uploadedBy  String
   uploader    User           @relation(fields: [uploadedBy], references: [id])
   createdAt   DateTime       @default(now())

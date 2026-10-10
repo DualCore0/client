@@ -1,169 +1,293 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
-import { BottomNav } from "@/components/BottomNav";
-const mockGlobalLeaderboard: any[] = [];
-import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import {
+  formatDate,
+  getSubmissions,
+  getTests,
+  percent,
+  type Submission,
+  type TestSummary,
+} from '@/lib/api';
+import { useAuth, useRequireAuth } from '@/components/AuthProvider';
+import { BottomNav, TopBar } from '@/components/BottomNav';
+import { EmptyState, ErrorState, LoadingState, StatusPill } from '@/components/States';
+
+type Filter = 'all' | 'todo' | 'done';
 
 export default function TestsPage() {
-  const [activeTab, setActiveTab] = useState("history"); // 'history' or 'global'
-  const [history, setHistory] = useState<any[]>([]);
+  const router = useRouter();
+  const { user, ready } = useRequireAuth();
+  const { signOut } = useAuth();
+
+  const [tests, setTests] = useState<TestSummary[]>([]);
+  const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<Filter>('all');
+
+  const load = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const [testList, subs] = await Promise.all([
+        getTests(),
+        user.role === 'STUDENT' ? getSubmissions() : Promise.resolve<Submission[]>([]),
+      ]);
+      setTests(testList);
+      setSubmissions(subs);
+    } catch (err) {
+      if (err instanceof Error && err.message.toLowerCase().includes('401')) signOut();
+      setError(err instanceof Error ? err.message : 'Could not load tests.');
+    } finally {
+      setLoading(false);
+    }
+  }, [user, signOut]);
 
   useEffect(() => {
-    import('../../lib/api').then(({ getSubmissions }) => {
-      getSubmissions().then((data) => {
-        setHistory(data.map((s: any) => ({
-          id: s.testId,
-          date: new Date(s.startTime).toLocaleDateString(),
-          title: s.test?.title || 'Assessment',
-          room: s.test?.room?.name || 'Classroom',
-          score: `${s.result?.score || 0}/${s.result?.maxScore || 100}`,
-          percentile: 90, // mock percentile
-          topScorer: 'N/A'
-        })));
-      }).catch(console.error);
-    });
-  }, []);
+    if (ready) void load();
+  }, [ready, load]);
+
+  const completedByTest = useMemo(() => {
+    const map = new Map<string, Submission>();
+    for (const s of submissions) {
+      if (!s.submittedAt) continue;
+      if (!map.has(s.testId)) map.set(s.testId, s);
+    }
+    return map;
+  }, [submissions]);
+
+  const pendingByTest = useMemo(() => {
+    const map = new Map<string, Submission>();
+    for (const s of submissions) {
+      if (s.submittedAt) continue;
+      map.set(s.testId, s);
+    }
+    return map;
+  }, [submissions]);
+
+  const visible = useMemo(() => {
+    if (user?.role !== 'STUDENT') return tests;
+    if (filter === 'todo') return tests.filter((t) => !completedByTest.has(t.id));
+    if (filter === 'done') return tests.filter((t) => completedByTest.has(t.id));
+    return tests;
+  }, [tests, filter, completedByTest, user?.role]);
+
+  const isTeacher = user?.role === 'TEACHER';
 
   return (
     <div className="flex-1 w-full bg-surface pb-24 min-h-screen">
-      
-      {/* Header */}
-      <header className="fixed top-0 w-full z-40 pt-safe bg-surface/85 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)]">
-        <div className="h-16 px-gutter-mobile flex items-center justify-between">
-          <h1 className="font-headline-sm text-headline-sm text-on-surface">Assessments</h1>
-          <button className="text-secondary hover:text-on-surface p-2">
-            <span className="material-symbols-outlined">search</span>
-          </button>
-        </div>
-      </header>
+      <TopBar
+        title="Assessments"
+        subtitle={isTeacher ? 'Teacher' : 'Student'}
+        action={
+          isTeacher ? (
+            <Link
+              href="/tests/create"
+              className="h-9 px-3 rounded-lg bg-primary text-on-primary font-headline-sm text-[13px] flex items-center gap-1"
+            >
+              <span className="material-symbols-outlined text-[18px]">add</span>
+              New test
+            </Link>
+          ) : undefined
+        }
+      />
 
-      <div className="pt-20 px-margin-mobile flex flex-col gap-space-md">
-        
-        {/* Tabs */}
-        <div className="flex items-center gap-2 bg-surface-container-low p-1 rounded-xl">
-          <button 
-            onClick={() => setActiveTab('history')}
-            className={`flex-1 py-2 text-center rounded-lg font-body-sm text-body-sm font-semibold transition-all ${activeTab === 'history' ? 'bg-surface-container-lowest text-primary shadow-sm' : 'text-on-surface-variant hover:text-on-surface'}`}
-          >
-            Test History
-          </button>
-          <button 
-            onClick={() => setActiveTab('global')}
-            className={`flex-1 py-2 text-center rounded-lg font-body-sm text-body-sm font-semibold transition-all flex items-center justify-center gap-1 ${activeTab === 'global' ? 'bg-surface-container-lowest text-primary shadow-sm' : 'text-on-surface-variant hover:text-on-surface'}`}
-          >
-            <span className="material-symbols-outlined text-[16px]">public</span> Global Rank
-          </button>
-        </div>
-
-        {activeTab === 'history' && (
-          <div className="flex flex-col gap-space-sm animate-in fade-in duration-300">
-            {history.map((test, index) => (
-              <Link href={`/tests/${test.id}/details`} key={test.id + '-' + index} className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm border border-surface-container flex flex-col gap-3 hover:bg-surface-container-low transition-colors active:scale-[0.99]">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex flex-col min-w-0">
-                    <span className="font-label-mono-sm text-[10px] text-secondary uppercase tracking-wider mb-1">
-                      {test.date}
-                    </span>
-                    <h3 className="font-headline-sm text-headline-sm text-on-surface truncate">
-                      {test.title}
-                    </h3>
-                    <p className="font-body-sm text-[13px] text-on-surface-variant truncate mt-0.5 flex items-center gap-1">
-                      <span className="material-symbols-outlined text-[14px]">meeting_room</span>
-                      {test.room}
-                    </p>
-                  </div>
-                  <div className="flex flex-col items-end shrink-0">
-                    <span className="font-stat-mono-lg text-lg text-primary">{test.score}</span>
-                    <span className="font-label-mono-sm text-[10px] text-tertiary font-bold">{test.percentile} PRCTL</span>
-                  </div>
-                </div>
-
-                <div className="mt-1 pt-3 border-t border-surface-container-low flex flex-col gap-1">
-                  <span className="font-label-mono-sm text-[10px] uppercase text-secondary">Class Top Scorer</span>
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-[16px] text-tertiary" style={{ fontVariationSettings: "'FILL' 1" }}>military_tech</span>
-                    <span className="font-body-sm text-[13px] font-semibold text-on-surface">{test.topScorer}</span>
-                  </div>
-                </div>
-              </Link>
+      <div className="pt-20 px-gutter-mobile max-w-3xl mx-auto flex flex-col gap-4">
+        {!isTeacher && (
+          <div className="grid grid-cols-3 gap-2">
+            {(
+              [
+                { key: 'all', label: 'All', count: tests.length },
+                { key: 'todo', label: 'To take', count: tests.length - completedByTest.size },
+                { key: 'done', label: 'Completed', count: completedByTest.size },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setFilter(tab.key)}
+                className={`rounded-xl border p-3 text-left transition-colors ${
+                  filter === tab.key
+                    ? 'border-primary/30 bg-primary/5'
+                    : 'border-surface-container bg-surface-container-lowest hover:bg-surface-container-low'
+                }`}
+              >
+                <span
+                  className={`block font-label-mono-sm text-label-mono-sm uppercase ${
+                    filter === tab.key ? 'text-primary' : 'text-secondary'
+                  }`}
+                >
+                  {tab.label}
+                </span>
+                <span className="block font-stat-mono-lg text-stat-mono-lg text-on-surface">{tab.count}</span>
+              </button>
             ))}
           </div>
         )}
 
-        {activeTab === 'global' && (
-          <div className="flex flex-col gap-space-xs animate-in fade-in duration-300">
-            <div className="bg-primary/5 rounded-xl p-space-md mb-2 flex items-start gap-3 border border-primary/10">
-              <div className="w-10 h-10 rounded-full bg-primary text-on-primary flex items-center justify-center shrink-0">
-                <span className="material-symbols-outlined text-[20px]">public</span>
-              </div>
-              <div className="flex flex-col">
-                <h3 className="font-headline-sm text-headline-sm text-primary">Global University Network</h3>
-                <p className="font-body-sm text-[13px] text-on-surface-variant mt-0.5">
-                  See how top students across 94+ enrolled universities perform in standardized modules.
-                </p>
-              </div>
-            </div>
+        {loading && <LoadingState label="Loading assessments…" />}
 
-            <div className="bg-surface-container-lowest rounded-xl overflow-hidden shadow-sm border border-surface-container">
-              <div className="grid grid-cols-12 px-space-sm py-2.5 bg-surface-container-low font-label-mono-sm text-[10px] uppercase text-on-surface-variant font-medium tracking-wider">
-                <span className="col-span-2 text-center">Rank</span>
-                <span className="col-span-7">Student & University</span>
-                <span className="col-span-3 text-right pr-2">Avg Score</span>
-              </div>
-              
-              <div className="flex flex-col divide-y divide-surface-container">
-                {mockGlobalLeaderboard.map((student) => (
-                  <Link href={`/profile/${student.id}`} key={student.rank} className="grid grid-cols-12 px-space-sm py-3 items-center hover:bg-surface-container-low/50 transition-colors active:scale-[0.99] block cursor-pointer">
-                    
-                    <div className="col-span-2 flex items-center justify-center">
-                      {student.rank <= 3 ? (
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center font-stat-mono-lg text-[12px] font-bold shadow-sm ${
-                          student.rank === 1 ? 'bg-tertiary text-on-tertiary' : 
-                          student.rank === 2 ? 'bg-surface-container-highest text-on-surface' : 
-                          'bg-surface-variant text-secondary'
-                        }`}>
-                          {student.rank}
-                        </div>
+        {!loading && error && <ErrorState message={error} onRetry={load} />}
+
+        {!loading && !error && visible.length === 0 && (
+          <EmptyState
+            icon={isTeacher ? 'note_add' : 'assignment'}
+            title={isTeacher ? 'No tests yet' : 'Nothing to take right now'}
+            description={
+              isTeacher
+                ? 'Create a room, upload a PDF and let AI draft your first test.'
+                : 'Join a room with a code, or check back once your teacher publishes a test.'
+            }
+            action={
+              <Link
+                href={isTeacher ? '/tests/create' : '/join'}
+                className="inline-flex h-10 px-4 items-center rounded-lg bg-primary text-on-primary font-headline-sm text-[14px]"
+              >
+                {isTeacher ? 'Create a test' : 'Join a room'}
+              </Link>
+            }
+          />
+        )}
+
+        {!loading &&
+          !error &&
+          visible.map((test) => {
+            const attempt = completedByTest.get(test.id);
+            const pending = pendingByTest.get(test.id);
+            const questionCount = test._count?.questions ?? test.questionCount ?? 0;
+
+            if (isTeacher) {
+              const attemptCount = test._count?.submissions ?? 0;
+              return (
+                <article
+                  key={test.id}
+                  className="rounded-xl bg-surface-container-lowest border border-surface-container p-4 flex flex-col gap-3"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <StatusPill status={test.status} />
+                        {test.room && (
+                          <span className="font-label-mono-sm text-label-mono-sm text-secondary truncate">
+                            {test.room.name}
+                          </span>
+                        )}
+                      </div>
+                      <h3 className="font-headline-sm text-headline-sm text-on-surface truncate">{test.title}</h3>
+                      <p className="font-body-sm text-[13px] text-on-surface-variant mt-0.5">
+                        {questionCount} question{questionCount === 1 ? '' : 's'}
+                        {test.duration ? ` • ${test.duration} min` : ' • untimed'} • {attemptCount} attempt
+                        {attemptCount === 1 ? '' : 's'}
+                      </p>
+                    </div>
+                    <span className="font-label-mono-sm text-label-mono-sm text-secondary shrink-0">
+                      {formatDate(test.createdAt)}
+                    </span>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <Link
+                      href={`/tests/${test.id}/results`}
+                      className="flex-1 h-10 rounded-lg bg-surface-container-low text-on-surface font-headline-sm text-[13px] flex items-center justify-center gap-1.5 hover:bg-surface-container"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">bar_chart</span>
+                      Results
+                    </Link>
+                    {test.room && (
+                      <Link
+                        href={`/rooms/${test.room.code}`}
+                        className="flex-1 h-10 rounded-lg bg-primary text-on-primary font-headline-sm text-[13px] flex items-center justify-center gap-1.5"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">meeting_room</span>
+                        Open room
+                      </Link>
+                    )}
+                  </div>
+                </article>
+              );
+            }
+
+            return (
+              <article
+                key={test.id}
+                className="rounded-xl bg-surface-container-lowest border border-surface-container p-4 flex flex-col gap-3"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      {attempt ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-tertiary-container/15 text-tertiary font-label-mono-sm text-label-mono-sm uppercase">
+                          <span className="material-symbols-outlined text-[13px]">check_circle</span> completed
+                        </span>
+                      ) : pending ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container font-label-mono-sm text-label-mono-sm uppercase">
+                          in progress
+                        </span>
                       ) : (
-                        <span className="font-stat-mono-lg text-[15px] leading-none text-secondary font-semibold">
-                          {String(student.rank).padStart(2, '0')}
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary font-label-mono-sm text-label-mono-sm uppercase">
+                          ready
+                        </span>
+                      )}
+                      {test.room && (
+                        <span className="font-label-mono-sm text-label-mono-sm text-secondary truncate">
+                          {test.room.name}
                         </span>
                       )}
                     </div>
-                    
-                    <div className="col-span-7 flex flex-col min-w-0 pr-1 pl-1">
-                      <span className="font-body-sm text-[13px] font-semibold text-on-surface truncate">
-                        {student.name}
+                    <h3 className="font-headline-sm text-headline-sm text-on-surface truncate">{test.title}</h3>
+                    <p className="font-body-sm text-[13px] text-on-surface-variant mt-0.5">
+                      {questionCount} question{questionCount === 1 ? '' : 's'}
+                      {test.duration ? ` • ${test.duration} min` : ' • untimed'}
+                    </p>
+                  </div>
+                  {attempt && (
+                    <div className="text-right shrink-0">
+                      <span className="block font-stat-mono-lg text-[20px] text-primary leading-none">
+                        {percent(attempt.percentage, 0)}
                       </span>
-                      <span className="font-label-mono-sm text-[10px] text-secondary truncate mt-0.5 flex items-center gap-1">
-                        <span className="material-symbols-outlined text-[12px]">account_balance</span>
-                        {student.university}
-                      </span>
-                      {student.badges && student.badges.length > 0 && (
-                        <div className="flex gap-1 mt-1">
-                          {student.badges.map((b: any) => (
-                            <span key={b} className="text-[9px] font-label-mono-sm uppercase bg-tertiary-container/10 text-tertiary px-1 py-0.5 rounded">
-                              {b}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    
-                    <div className="col-span-3 flex flex-col items-end justify-center pr-2">
-                      <span className="font-stat-mono-lg text-[15px] leading-none font-semibold text-primary">
-                        {student.score}%
+                      <span className="font-label-mono-sm text-[11px] text-secondary">
+                        {attempt.score ?? 0}/{questionCount || '—'}
                       </span>
                     </div>
+                  )}
+                </div>
 
-                  </Link>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
+                {attempt ? (
+                  <div className="flex gap-2">
+                    <Link
+                      href={`/tests/${test.id}/result`}
+                      className="flex-1 h-10 rounded-lg bg-surface-container-low text-on-surface font-headline-sm text-[13px] flex items-center justify-center gap-1.5"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">visibility</span>
+                      Review
+                    </Link>
+                    {test.room && (
+                      <Link
+                        href={`/rooms/${test.room.code}/leaderboard`}
+                        className="flex-1 h-10 rounded-lg bg-surface-container-low text-on-surface font-headline-sm text-[13px] flex items-center justify-center gap-1.5"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">leaderboard</span>
+                        Leaderboard
+                      </Link>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/tests/${test.id}`)}
+                    className="w-full h-11 rounded-lg bg-primary text-on-primary font-headline-sm text-[14px] flex items-center justify-center gap-2"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">play_arrow</span>
+                    {pending ? 'Resume attempt' : 'Start assessment'}
+                  </button>
+                )}
+              </article>
+            );
+          })}
       </div>
 
       <BottomNav />

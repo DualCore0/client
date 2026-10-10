@@ -26,4 +26,8 @@ export class GenerateTestDto {
   @IsOptional()
   @IsString()
   difficulty?: string;
+
+  @IsOptional()
+  @IsString()
+  topic?: string;
 }

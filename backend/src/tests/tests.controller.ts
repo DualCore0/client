@@ -53,6 +53,12 @@ export class TestsController {
     return this.testsService.getTestsByRoom(roomId, req.user.userId, req.user.role);
   }
 
+  @Get(':id/results')
+  @Roles(Role.TEACHER)
+  getTestResults(@Param('id') id: string, @Request() req: any) {
+    return this.testsService.getTestResults(id, req.user.userId);
+  }
+
   @Get(':id')
   getTestById(@Param('id') id: string, @Request() req: any) {
     return this.testsService.getTestById(id, req.user.userId, req.user.role);

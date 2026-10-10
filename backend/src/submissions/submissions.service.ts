@@ -25,6 +25,37 @@ export class SubmissionsService {
     });
   }
 
+  /**
+   * Current attempt state for a test, including the server-computed deadline so
+   * the client timer survives a page refresh.
+   */
+  async getAttemptState(testId: string, studentId: string) {
+    const test = await this.prisma.test.findUnique({
+      where: { id: testId },
+      select: { id: true, title: true, duration: true, status: true },
+    });
+    if (!test) throw new NotFoundException('Test not found');
+
+    const submission = await this.prisma.submission.findUnique({
+      where: { testId_studentId: { testId, studentId } },
+    });
+
+    const deadline =
+      submission && test.duration
+        ? new Date(submission.startedAt.getTime() + test.duration * 60 * 1000).toISOString()
+        : null;
+
+    return {
+      test,
+      submissionId: submission?.id ?? null,
+      startedAt: submission?.startedAt ?? null,
+      submittedAt: submission?.submittedAt ?? null,
+      deadline,
+      score: submission?.score ?? null,
+      percentage: submission?.percentage ?? null,
+    };
+  }
+
   async submitTest(testId: string, studentId: string, answers: { questionId: string, selectedAnswer: number }[]) {
     const submission = await this.prisma.submission.findUnique({
       where: { testId_studentId: { testId, studentId } },
@@ -38,24 +69,22 @@ export class SubmissionsService {
 
     const test = submission.test;
 
-    // Check timer (grace period of 60 seconds)
-    if (test.duration) {
-      const timeAllowed = test.duration * 60 * 1000;
-      const elapsed = Date.now() - submission.startedAt.getTime();
-      if (elapsed > timeAllowed + 60000) { // 1 min grace
-        throw new BadRequestException('Time is up. Submission rejected.');
-      }
-    }
+    // Enforce the timer server-side. A late submission is still graded (with
+    // whatever was answered) rather than lost, matching the "auto-close" rule.
+    const timeAllowed = test.duration ? test.duration * 60 * 1000 : null;
+    const elapsed = Date.now() - submission.startedAt.getTime();
+    const isLate = timeAllowed !== null && elapsed > timeAllowed + 60000;
 
     let score = 0;
     let maxScore = 0;
     let correctAnswersCount = 0;
     let wrongAnswersCount = 0;
 
-    const answerData = answers.map(a => {
-      const q = test.questions.find(q => q.id === a.questionId);
-      let isCorrect = false;
-      if (q) {
+    const answerData = answers
+      .filter((a) => test.questions.some((q) => q.id === a.questionId))
+      .map(a => {
+        const q = test.questions.find(q => q.id === a.questionId)!;
+        let isCorrect = false;
         maxScore += q.points;
         if (a.selectedAnswer === q.correctAnswer) {
           isCorrect = true;
@@ -64,14 +93,13 @@ export class SubmissionsService {
         } else {
           wrongAnswersCount++;
         }
-      }
-      return {
-        submissionId: submission.id,
-        questionId: a.questionId,
-        selectedAnswer: a.selectedAnswer,
-        isCorrect
-      };
-    });
+        return {
+          submissionId: submission.id,
+          questionId: a.questionId,
+          selectedAnswer: a.selectedAnswer,
+          isCorrect
+        };
+      });
 
     // Handle skipped questions
     const answeredQuestionIds = new Set(answerData.map(a => a.questionId));
@@ -83,18 +111,20 @@ export class SubmissionsService {
     }
 
     const percentage = maxScore > 0 ? (score / maxScore) * 100 : 0;
-    const timeTaken = Math.floor((Date.now() - submission.startedAt.getTime()) / 1000);
+    const timeTaken = Math.min(Math.floor(elapsed / 1000), test.duration ? test.duration * 60 : Math.floor(elapsed / 1000));
 
     // Save answers
-    await this.prisma.answer.createMany({
-      data: answerData,
-      skipDuplicates: true,
-    });
+    if (answerData.length > 0) {
+      await this.prisma.answer.createMany({
+        data: answerData,
+        skipDuplicates: true,
+      });
+    }
 
     // Mark submission as ended and save stats
-    return this.prisma.submission.update({
+    const updated = await this.prisma.submission.update({
       where: { id: submission.id },
-      data: { 
+      data: {
         submittedAt: new Date(),
         score,
         percentage,
@@ -102,14 +132,26 @@ export class SubmissionsService {
         wrongAnswers: wrongAnswersCount,
         timeTaken
       },
-      include: { answers: true }
+      include: {
+        answers: true,
+        test: { include: { room: { select: { id: true, name: true, code: true } } } },
+      }
     });
+
+    return { ...updated, wasLate: isLate };
   }
 
   async getMySubmissions(studentId: string) {
     return this.prisma.submission.findMany({
       where: { studentId },
-      include: { test: true },
+      include: {
+        test: {
+          select: {
+            id: true, title: true, topic: true, duration: true, questionCount: true,
+            room: { select: { id: true, name: true, code: true } },
+          },
+        },
+      },
       orderBy: { startedAt: 'desc' }
     });
   }
@@ -117,14 +159,55 @@ export class SubmissionsService {
   async getSubmissionDetails(submissionId: string, userId: string) {
     const submission = await this.prisma.submission.findUnique({
       where: { id: submissionId },
-      include: { 
-        test: { include: { questions: true } },
-        answers: true
+      include: {
+        test: {
+          include: {
+            questions: true,
+            room: { select: { id: true, name: true, code: true } },
+          },
+        },
+        answers: true,
       }
     });
     if (!submission) throw new NotFoundException('Submission not found');
     if (submission.studentId !== userId) throw new ForbiddenException('Not your submission');
 
-    return submission;
+    // Answer review: correct answers are only revealed after submission.
+    const isSubmitted = !!submission.submittedAt;
+    const questions = submission.test.questions.map((q) => {
+      const answer = submission.answers.find((a) => a.questionId === q.id);
+      return {
+        id: q.id,
+        questionText: q.questionText,
+        options: q.options,
+        points: q.points,
+        difficulty: q.difficulty,
+        selectedAnswer: answer?.selectedAnswer ?? null,
+        isCorrect: answer?.isCorrect ?? false,
+        correctAnswer: isSubmitted ? q.correctAnswer : undefined,
+      };
+    });
+
+    return {
+      id: submission.id,
+      testId: submission.testId,
+      score: submission.score,
+      percentage: submission.percentage,
+      correctAnswers: submission.correctAnswers,
+      wrongAnswers: submission.wrongAnswers,
+      timeTaken: submission.timeTaken,
+      startedAt: submission.startedAt,
+      submittedAt: submission.submittedAt,
+      test: {
+        id: submission.test.id,
+        title: submission.test.title,
+        topic: submission.test.topic,
+        duration: submission.test.duration,
+        questionCount: submission.test.questionCount,
+        status: submission.test.status,
+        room: submission.test.room,
+      },
+      questions,
+    };
   }
 }
